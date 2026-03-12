@@ -8,7 +8,7 @@ import SaveBar from '@/components/SaveBar';
 import OcrReviewPanel from '@/components/OcrReviewPanel';
 import DocumentPanel from '@/components/DocumentPanel';
 import { calculate } from '@/lib/calculations';
-import { fetchMasters, generateReport, parseDrawing } from '@/lib/api';
+import { fetchMasters, generateReport, getAiApiUnavailableMessage, isAiApiAvailable, parseDrawing } from '@/lib/api';
 import { canonicalizeMasterName, createSeedMasterItems } from '@/lib/masterData';
 import {
   createDefaultBlock,
@@ -305,6 +305,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
 
   const activeCandidateId = hoveredCandidateId ?? selectedCandidateId;
   const effectiveDate = new Date().toISOString().slice(0, 10);
+  const uploadDisabledReason = isAiApiAvailable() ? null : getAiApiUnavailableMessage();
   const result = useMemo(() => (activeBlock ? calculate(activeBlock, { masters, effectiveDate }) : null), [activeBlock, effectiveDate, masters]);
 
   useEffect(() => {
@@ -470,6 +471,12 @@ export default function Home({ preferredBlockType }: HomeProps) {
 
   const handleUploadFile = useCallback(async (file: File) => {
     if (!activeProject || !activeBlock) return;
+    if (!isAiApiAvailable()) {
+      const message = getAiApiUnavailableMessage();
+      setUploadError(message);
+      toast.error(message);
+      return;
+    }
     setUploadError(null);
     setIsUploading(true);
 
@@ -508,7 +515,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
     } finally {
       setIsUploading(false);
     }
-  }, [activeBlock, activeProject, replaceActiveProject]);
+  }, [activeBlock, activeProject, masters, replaceActiveProject]);
 
   const handleApplyCandidate = useCallback((candidateId: string) => {
     if (!activeProject || !activeBlock || !activeDrawing) return;
@@ -674,6 +681,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
             activeCandidateId={activeCandidateId}
             isUploading={isUploading}
             uploadError={uploadError}
+            uploadDisabledReason={uploadDisabledReason}
             onUploadFile={handleUploadFile}
             onSelectDrawing={handleSelectDrawing}
             onSelectOcrItem={handleSelectOcrItem}

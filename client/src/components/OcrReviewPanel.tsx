@@ -12,6 +12,7 @@ interface OcrReviewPanelProps {
   activeCandidateId: string | null;
   isUploading: boolean;
   uploadError: string | null;
+  uploadDisabledReason?: string | null;
   onUploadFile: (file: File) => void;
   onSelectDrawing: (drawingId: string) => void;
   onSelectOcrItem: (itemId: string | null) => void;
@@ -36,6 +37,7 @@ export default function OcrReviewPanel({
   activeCandidateId,
   isUploading,
   uploadError,
+  uploadDisabledReason,
   onUploadFile,
   onSelectDrawing,
   onSelectOcrItem,
@@ -99,8 +101,9 @@ export default function OcrReviewPanel({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
+              disabled={isUploading || Boolean(uploadDisabledReason)}
               className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              title={uploadDisabledReason ?? undefined}
             >
               {isUploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
               {isUploading ? 'OCR解析中...' : '図面をアップロード'}
@@ -124,6 +127,12 @@ export default function OcrReviewPanel({
         {uploadError && (
           <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
             {uploadError}
+          </div>
+        )}
+
+        {!uploadError && uploadDisabledReason && (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {uploadDisabledReason}
           </div>
         )}
 
