@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
+import { createAppStateApiMiddleware } from "./server/appStateApi";
 
 // =============================================================================
 // Manus Debug Collector - Vite Plugin
@@ -150,7 +151,23 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+function vitePluginProjectStateApi(): Plugin {
+  return {
+    name: "project-state-api",
+    configureServer(server) {
+      server.middlewares.use(createAppStateApiMiddleware());
+    },
+  };
+}
+
+const plugins = [
+  react(),
+  tailwindcss(),
+  jsxLocPlugin(),
+  vitePluginManusRuntime(),
+  vitePluginManusDebugCollector(),
+  vitePluginProjectStateApi(),
+];
 
 export default defineConfig({
   plugins,

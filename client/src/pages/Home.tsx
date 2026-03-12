@@ -11,6 +11,7 @@ import { parseDrawing } from '@/lib/api';
 import {
   createDefaultBlock,
   createDefaultProject,
+  createInitialAppState,
   type AICandidate,
   type AppState,
   type Drawing,
@@ -167,9 +168,18 @@ export default function Home() {
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const data = loadData();
-    setAppState(data);
-    setInitialized(true);
+    let cancelled = false;
+
+    void (async () => {
+      const data = await loadData();
+      if (cancelled) return;
+      setAppState(data);
+      setInitialized(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -178,7 +188,7 @@ export default function Home() {
       clearTimeout(autoSaveTimerRef.current);
     }
     autoSaveTimerRef.current = setTimeout(() => {
-      saveData(appState);
+      void saveData(appState);
     }, 1000);
     return () => {
       if (autoSaveTimerRef.current) {
@@ -243,7 +253,7 @@ export default function Home() {
     if (!name) return;
     const project = createDefaultProject(name);
     setAppState((prev) => {
-      const current = prev ?? loadData();
+      const current = prev ?? createInitialAppState();
       return {
         ...current,
         projects: [...current.projects, project],
@@ -299,9 +309,9 @@ export default function Home() {
     setAppState((prev) => (prev ? { ...prev, activeBlockId: remainingBlocks[0]?.id ?? null } : prev));
   }, [activeProject, activeBlock, replaceActiveProject]);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!appState) return;
-    saveData(appState);
+    await saveData(appState);
     toast.success('案件データを保存しました。');
   }, [appState]);
 

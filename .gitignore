@@ -111,3 +111,6 @@ temp/
 .vercel
 ai_api/.venv/
 ai_api/storage/previews/
+__pycache__/
+*.pyc
+server/data/app-state.json
