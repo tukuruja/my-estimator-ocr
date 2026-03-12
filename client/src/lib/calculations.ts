@@ -213,21 +213,26 @@ function miscMasterByKeyword(masters: PriceMasterItem[], keyword: string, effect
 function buildRateContext(block: EstimateBlock, options?: CalculationOptions): RateContext {
   const masters = resolveMasters(options?.masters);
   const effectiveDate = options?.effectiveDate ?? DEFAULT_EFFECTIVE_DATE;
+  const fallbackMachine = backhoes.find((item) => item.name === block.machine) ?? null;
+  const fallbackDump = dumpTrucks.find((item) => item.name === block.dumpTruck) ?? null;
+  const fallbackStone = crushedStones.find((item) => item.name === block.crushedStone) ?? null;
+  const fallbackConcrete = concretes.find((item) => item.name === block.concrete) ?? null;
+  const fallbackProduct = secondaryProducts.find((item) => item.name === block.secondaryProduct) ?? null;
 
   const selectedMachine = adoptMaster(masters, 'machine', block.machine, effectiveDate)
-    ?? backhoes.find((item) => item.name === block.machine)
+    ?? fallbackMachine
     ?? null;
   const selectedDump = adoptMaster(masters, 'dump_truck', block.dumpTruck, effectiveDate)
-    ?? dumpTrucks.find((item) => item.name === block.dumpTruck)
+    ?? fallbackDump
     ?? null;
   const selectedStone = adoptMaster(masters, 'crushed_stone', block.crushedStone, effectiveDate)
-    ?? crushedStones.find((item) => item.name === block.crushedStone)
+    ?? fallbackStone
     ?? null;
   const selectedConcrete = adoptMaster(masters, 'concrete', block.concrete, effectiveDate)
-    ?? concretes.find((item) => item.name === block.concrete)
+    ?? fallbackConcrete
     ?? null;
   const selectedProduct = adoptMaster(masters, 'secondary_product', block.secondaryProduct, effectiveDate)
-    ?? secondaryProducts.find((item) => item.name === block.secondaryProduct)
+    ?? fallbackProduct
     ?? null;
   const selectedLabor = adoptMaster(masters, 'labor', '標準労務単価', effectiveDate);
   const selectedCement = adoptMaster(masters, 'misc', 'セメント単価', effectiveDate);
@@ -237,12 +242,12 @@ function buildRateContext(block: EstimateBlock, options?: CalculationOptions): R
     effectiveDate,
     laborCost: block.laborCost || selectedLabor?.unitPrice || 27500,
     machineUnitPrice: resolvePricedValue(selectedMachine),
-    machineCapacity: resolveCapacityValue(selectedMachine),
+    machineCapacity: resolveCapacityValue(selectedMachine) || Number(fallbackMachine?.capacity ?? 0),
     dumpVehicleUnitPrice: resolvePricedValue(selectedDump),
-    dumpCapacity: resolveCapacityValue(selectedDump),
-    stoneUnitPrice: resolvePricedValue(selectedStone),
-    concreteUnitPrice: resolvePricedValue(selectedConcrete),
-    productUnitPrice: resolvePricedValue(selectedProduct),
+    dumpCapacity: resolveCapacityValue(selectedDump) || Number(fallbackDump?.capacity ?? 0),
+    stoneUnitPrice: resolvePricedValue(selectedStone) || Number(fallbackStone?.price ?? 0),
+    concreteUnitPrice: resolvePricedValue(selectedConcrete) || Number(fallbackConcrete?.price ?? 0),
+    productUnitPrice: resolvePricedValue(selectedProduct) || Number(fallbackProduct?.price ?? 0),
     cementUnitPrice: selectedCement?.unitPrice ?? 600,
   };
 }
