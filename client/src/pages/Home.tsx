@@ -9,7 +9,7 @@ import OcrReviewPanel from '@/components/OcrReviewPanel';
 import DocumentPanel from '@/components/DocumentPanel';
 import { calculate } from '@/lib/calculations';
 import { fetchMasters, generateReport, parseDrawing } from '@/lib/api';
-import { createSeedMasterItems } from '@/lib/masterData';
+import { canonicalizeMasterName, createSeedMasterItems } from '@/lib/masterData';
 import {
   createDefaultBlock,
   createDefaultProject,
@@ -20,6 +20,7 @@ import {
   type Drawing,
   type EstimateBlock,
   type GeneratedReportBundle,
+  type MasterType,
   type ParseDrawingResponse,
   type PriceMasterItem,
   type Project,
@@ -86,25 +87,50 @@ function updateProjectCollection(projects: Project[], projectId: string, updater
   return projects.map((project) => (project.id === projectId ? updater(project) : project));
 }
 
-function buildDrawingFromParseResponse(projectId: string, file: File, payload: ParseDrawingResponse): Drawing {
+function masterTypeForCandidate(fieldName: string, blockType: BlockType): MasterType | null {
+  if (fieldName === 'secondaryProduct' && blockType === 'secondary_product') {
+    return 'secondary_product';
+  }
+  if (fieldName === 'machine') return 'machine';
+  if (fieldName === 'dumpTruck') return 'dump_truck';
+  if (fieldName === 'crushedStone') return 'crushed_stone';
+  if (fieldName === 'concrete') return 'concrete';
+  return null;
+}
+
+function buildDrawingFromParseResponse(
+  projectId: string,
+  file: File,
+  payload: ParseDrawingResponse,
+  blockType: BlockType,
+  masters: PriceMasterItem[],
+  effectiveDate: string,
+): Drawing {
   const previews = payload.pagePreviews && payload.pagePreviews.length > 0 ? payload.pagePreviews : [payload.pagePreview];
 
   const aiCandidates: AICandidate[] = Object.entries(payload.aiCandidates || {}).map(([fieldName, candidate]) => {
     const valueType = candidate.valueType ?? (typeof candidate.valueNumber === 'number' || typeof candidate.value === 'number' ? 'number' : 'string');
+    const rawTextValue = candidate.valueText ?? (typeof candidate.value === 'string' ? candidate.value : undefined);
+    const masterType = valueType === 'string' ? masterTypeForCandidate(fieldName, blockType) : null;
+    const normalized = rawTextValue && masterType
+      ? canonicalizeMasterName(masters, masterType, rawTextValue, effectiveDate)
+      : null;
+    const valueText = normalized?.value ?? rawTextValue;
+    const matchedMaster = normalized?.matched ?? false;
 
     return {
       id: crypto.randomUUID(),
       fieldName,
       label: candidate.label || CANDIDATE_LABELS[fieldName] || fieldName,
       valueType,
-      valueText: candidate.valueText ?? (typeof candidate.value === 'string' ? candidate.value : undefined),
+      valueText,
       valueNumber: candidate.valueNumber ?? (typeof candidate.value === 'number' ? candidate.value : undefined),
       confidence: candidate.confidence,
       sourceText: candidate.sourceText,
       sourcePage: candidate.sourcePage,
       sourceBox: candidate.sourceBox,
-      reason: candidate.reason,
-      requiresReview: candidate.requiresReview,
+      reason: matchedMaster ? `${candidate.reason} / 単価マスタ名へ正規化` : candidate.reason,
+      requiresReview: candidate.requiresReview || Boolean(masterType && rawTextValue && !matchedMaster),
     };
   });
 
@@ -449,7 +475,14 @@ export default function Home({ preferredBlockType }: HomeProps) {
 
     try {
       const payload = await parseDrawing(file, activeBlock.blockType);
-      const nextDrawing = buildDrawingFromParseResponse(activeProject.id, file, payload);
+      const nextDrawing = buildDrawingFromParseResponse(
+        activeProject.id,
+        file,
+        payload,
+        activeBlock.blockType,
+        masters,
+        new Date().toISOString().slice(0, 10),
+      );
 
       replaceActiveProject((project) => ({
         ...project,

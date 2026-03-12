@@ -48,15 +48,100 @@ function slugify(input: string): string {
     .replace(/^-+|-+$/g, '') || 'master-item';
 }
 
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
+}
+
+function compactText(value: string): string {
+  return value.normalize('NFKC').replace(/[\s　]+/g, '');
+}
+
+export function normalizeLookupText(value: string): string {
+  return compactText(value)
+    .toUpperCase()
+    .replace(/[‐‑‒–—―ーｰ－]/g, '-')
+    .replace(/[×✕╳＊*]/g, 'X')
+    .replace(/M\^?3|㎥/g, 'M3')
+    .replace(/バックホウ|バックホー/g, 'BH')
+    .replace(/ダンプトラック/g, 'ダンプ')
+    .replace(/NO\./g, 'NO')
+    .replace(/№/g, 'NO')
+    .replace(/φ/g, '')
+    .replace(/[^A-Z0-9一-龯ぁ-んァ-ヶ]/g, '');
+}
+
+function capacityVariants(capacity: number): string[] {
+  if (!Number.isFinite(capacity) || capacity <= 0) return [];
+  return uniqueStrings([
+    capacity.toFixed(2),
+    String(Number(capacity.toFixed(2))),
+    capacity.toFixed(1),
+  ]);
+}
+
+function tonnageVariants(value: string): string[] {
+  const match = value.normalize('NFKC').match(/(\d+(?:\.\d+)?)\s*Tダンプ/i);
+  if (!match) return [];
+  return uniqueStrings([
+    match[1],
+    String(Number(match[1])),
+  ]);
+}
+
 function normalizeAliasSeed(name: string): string[] {
-  const compact = name.replace(/[\s　]+/g, '');
-  const normalized = compact
-    .replace(/ｺ/g, 'コ')
-    .replace(/ﾎ/g, 'ホ')
-    .replace(/ｰ/g, 'ー')
-    .replace(/ﾄ/g, 'ト')
-    .replace(/ﾙ/g, 'ル');
-  return Array.from(new Set([name, compact, normalized])).filter(Boolean);
+  return uniqueStrings([name, compactText(name), normalizeLookupText(name)]);
+}
+
+function buildMachineAliases(name: string, capacity: number): string[] {
+  const values = [...normalizeAliasSeed(name)];
+  for (const variant of capacityVariants(capacity)) {
+    values.push(
+      `${variant}BH`,
+      `BH${variant}`,
+      `バックホウ ${variant}m3`,
+      `バックホウ${variant}m3`,
+      `バックホー ${variant}m3`,
+      `バックホー${variant}m3`,
+    );
+  }
+  return uniqueStrings(values);
+}
+
+function buildDumpAliases(name: string, capacity: number): string[] {
+  const values = [...normalizeAliasSeed(name)];
+  const tonnages = tonnageVariants(name);
+  const capacities = capacityVariants(capacity);
+  for (const tonnage of tonnages) {
+    values.push(`${tonnage}Tダンプ`, `${tonnage}tダンプ`, `${tonnage}tダンプトラック`);
+    for (const volume of capacities) {
+      values.push(`${tonnage}Tダンプ ${volume}m3`, `${tonnage}tダンプ ${volume}m3`, `${tonnage}Tダンプ${volume}m3`);
+    }
+  }
+  return uniqueStrings(values);
+}
+
+function buildStoneAliases(name: string): string[] {
+  const normalized = name.normalize('NFKC').toUpperCase();
+  const values = [...normalizeAliasSeed(name)];
+  if (normalized.includes('RC-40') || normalized.includes('RC40')) {
+    values.push('RC-40', 'RC40', '再生砕石 RC-40', '再生砕石RC-40');
+  }
+  if (normalized.includes('C-40') || normalized.includes('C40')) {
+    values.push('C-40', 'C40', '砕石 C-40', '砕石C-40');
+  }
+  return uniqueStrings(values);
+}
+
+function buildConcreteAliases(name: string): string[] {
+  const compact = compactText(name);
+  const values = [...normalizeAliasSeed(name)];
+  const mixMatch = compact.match(/(\d{2})-(\d{1,2})-(\d{2})([A-Z]{0,3})/i);
+  if (mixMatch) {
+    const canonical = `${mixMatch[1]}-${mixMatch[2]}-${mixMatch[3]}${mixMatch[4] ?? ''}`;
+    const padded = `${mixMatch[1]}-${mixMatch[2].padStart(2, '0')}-${mixMatch[3]}${mixMatch[4] ?? ''}`;
+    values.push(canonical, padded, `生コン ${canonical}`, `生コン${canonical}`, `生コン ${padded}`, `生コン${padded}`);
+  }
+  return uniqueStrings(values);
 }
 
 function createMasterItem(
@@ -92,16 +177,28 @@ export function createSeedMasterItems(): PriceMasterItem[] {
     items.push(createMasterItem('secondary_product', item.name, item.price, '本', { notes: '二次製品単価' }));
   }
   for (const item of backhoes) {
-    items.push(createMasterItem('machine', item.name, item.price, '日', { notes: `機械容量:${item.capacity}m3` }));
+    items.push(createMasterItem('machine', item.name, item.price, '日', {
+      aliases: buildMachineAliases(item.name, item.capacity),
+      notes: `機械容量:${item.capacity}m3`,
+    }));
   }
   for (const item of dumpTrucks) {
-    items.push(createMasterItem('dump_truck', item.name, item.price, '台日', { notes: `積載容量:${item.capacity}m3` }));
+    items.push(createMasterItem('dump_truck', item.name, item.price, '台日', {
+      aliases: buildDumpAliases(item.name, item.capacity),
+      notes: `積載容量:${item.capacity}m3`,
+    }));
   }
   for (const item of crushedStones) {
-    items.push(createMasterItem('crushed_stone', item.name, item.price, 'm3', { notes: '砕石材料単価' }));
+    items.push(createMasterItem('crushed_stone', item.name, item.price, 'm3', {
+      aliases: buildStoneAliases(item.name),
+      notes: '砕石材料単価',
+    }));
   }
   for (const item of concretes) {
-    items.push(createMasterItem('concrete', item.name, item.price, 'm3', { notes: '生コン・モルタル単価' }));
+    items.push(createMasterItem('concrete', item.name, item.price, 'm3', {
+      aliases: buildConcreteAliases(item.name),
+      notes: '生コン・モルタル単価',
+    }));
   }
   for (const item of pumpTrucks) {
     items.push(createMasterItem('pump_truck', item.name, item.price, '回', { notes: 'ポンプ・圧送単価' }));
@@ -141,7 +238,8 @@ export function filterMasterItems(
   items: PriceMasterItem[],
   query: { masterType?: string | null; keyword?: string | null; effectiveDate?: string | null },
 ): PriceMasterItem[] {
-  const keyword = query.keyword?.trim().toLowerCase() ?? '';
+  const keyword = query.keyword?.trim() ?? '';
+  const normalizedKeyword = keyword ? normalizeLookupText(keyword) : '';
   const effectiveDate = query.effectiveDate?.trim() ?? '';
 
   return items.filter((item) => {
@@ -149,8 +247,12 @@ export function filterMasterItems(
       return false;
     }
     if (keyword) {
-      const haystack = [item.name, item.code, ...item.aliases].join(' ').toLowerCase();
-      if (!haystack.includes(keyword)) {
+      const haystack = uniqueStrings([item.name, item.code, ...item.aliases]);
+      const matched = haystack.some((value) => (
+        value.toLowerCase().includes(keyword.toLowerCase())
+        || normalizeLookupText(value).includes(normalizedKeyword)
+      ));
+      if (!matched) {
         return false;
       }
     }
@@ -167,11 +269,43 @@ export function findMasterByName(
   name: string,
   effectiveDate: string,
 ): PriceMasterItem | null {
-  const matched = items.find((item) => (
-    item.masterType === masterType
-    && item.name === name
-    && isMasterEffective(item, effectiveDate)
-  ));
+  const activeItems = items.filter((item) => item.masterType === masterType && isMasterEffective(item, effectiveDate));
+  if (activeItems.length === 0 || !name.trim()) {
+    return null;
+  }
 
-  return matched ?? null;
+  const exactNameMatches = activeItems.filter((item) => item.name === name);
+  if (exactNameMatches.length === 1) {
+    return exactNameMatches[0];
+  }
+
+  const exactAliasMatches = activeItems.filter((item) => item.aliases.includes(name));
+  if (exactAliasMatches.length === 1) {
+    return exactAliasMatches[0];
+  }
+
+  const normalizedTarget = normalizeLookupText(name);
+  if (!normalizedTarget) {
+    return null;
+  }
+
+  const normalizedMatches = activeItems.filter((item) => {
+    const lookupValues = uniqueStrings([item.name, item.code, ...item.aliases]).map(normalizeLookupText);
+    return lookupValues.includes(normalizedTarget);
+  });
+
+  return normalizedMatches.length === 1 ? normalizedMatches[0] : null;
+}
+
+export function canonicalizeMasterName(
+  items: PriceMasterItem[],
+  masterType: MasterType,
+  rawName: string,
+  effectiveDate: string,
+): { value: string; matched: boolean } {
+  const matched = findMasterByName(items, masterType, rawName, effectiveDate);
+  if (!matched) {
+    return { value: rawName, matched: false };
+  }
+  return { value: matched.name, matched: true };
 }
