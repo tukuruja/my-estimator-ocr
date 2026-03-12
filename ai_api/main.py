@@ -61,6 +61,13 @@ SECONDARY_PRODUCT_HINT_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 
+WORK_TYPE_PATTERNS: dict[str, tuple[tuple[str, ...], str]] = {
+    "secondary_product": (("U字溝", "側溝", "暗渠", "コネクトホール", "街渠", "縁塊", "桝", "マンホール"), "二次製品工"),
+    "retaining_wall": (("擁壁", "L型", "重力式", "逆T", "控長", "根入れ", "水抜き"), "擁壁工"),
+    "pavement": (("舗装", "路盤", "表層", "基層", "アスファルト", "切削", "不陸整正"), "舗装工"),
+    "demolition": (("撤去", "取壊", "はつり", "解体", "撤去工", "処分"), "撤去工"),
+}
+
 FULL_WIDTH_TRANS = str.maketrans({
     "０": "0",
     "１": "1",
@@ -181,6 +188,39 @@ def match_secondary_product(source_text: str) -> tuple[str | None, float, bool]:
 
     is_ambiguous = second_score >= best_score - 0.04
     return best_name, best_score, is_ambiguous
+
+
+def classify_work_types(ocr_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    scored: list[dict[str, Any]] = []
+    searchable_texts = [normalize_text(item["text"]) for item in ocr_items]
+
+    for block_type, (keywords, label) in WORK_TYPE_PATTERNS.items():
+        matched_texts: list[str] = []
+        match_score = 0.0
+        for item, normalized in zip(ocr_items, searchable_texts):
+            item_matches = [keyword for keyword in keywords if keyword.lower() in normalized.lower()]
+            if item_matches:
+                matched_texts.append(item["text"])
+                match_score += max(0.35, min(item["score"], 1.0))
+
+        if not matched_texts:
+            continue
+
+        confidence = min(0.98, 0.45 + (match_score / max(len(keywords), 1)) * 0.5)
+        scored.append({
+            "blockType": block_type,
+            "label": label,
+            "confidence": round(confidence, 4),
+            "reason": f"キーワード一致: {', '.join(matched_texts[:3])}",
+            "sourceTexts": matched_texts[:5],
+            "requiresReview": False,
+        })
+
+    scored.sort(key=lambda item: item["confidence"], reverse=True)
+    if len(scored) > 1 and scored[0]["confidence"] - scored[1]["confidence"] < 0.12:
+        scored[0]["requiresReview"] = True
+        scored[1]["requiresReview"] = True
+    return scored
 
 
 def build_candidate(field_name: str, source_text: str, source_page: int, source_box: list[float], value: str | float, reason: str, confidence: float, requires_review: bool) -> dict[str, Any]:
@@ -523,6 +563,7 @@ async def parse_drawing(
         all_ocr_items.extend(run_ocr_on_page(page_image, index))
 
     ai_candidates = extract_candidates(all_ocr_items) if mode == "secondary_product" else {}
+    work_type_candidates = classify_work_types(all_ocr_items)
 
     return {
         "drawingSource": {
@@ -531,6 +572,7 @@ async def parse_drawing(
             "pageCount": len(pages),
         },
         "aiCandidates": ai_candidates,
+        "workTypeCandidates": work_type_candidates,
         "ocrLines": [item["text"] for item in all_ocr_items],
         "ocrItems": all_ocr_items,
         "pagePreview": page_previews[0] if page_previews else None,

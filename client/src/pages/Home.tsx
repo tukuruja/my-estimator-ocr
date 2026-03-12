@@ -6,8 +6,11 @@ import InputForm from '@/components/InputForm';
 import CalculationResults from '@/components/CalculationResults';
 import SaveBar from '@/components/SaveBar';
 import OcrReviewPanel from '@/components/OcrReviewPanel';
+import DocumentPanel from '@/components/DocumentPanel';
 import { calculate } from '@/lib/calculations';
-import { parseDrawing } from '@/lib/api';
+import { fetchMasters, parseDrawing } from '@/lib/api';
+import { createSeedMasterItems } from '@/lib/masterData';
+import { generateReportBundle } from '@/lib/reporting';
 import {
   createDefaultBlock,
   createDefaultProject,
@@ -17,6 +20,7 @@ import {
   type Drawing,
   type EstimateBlock,
   type ParseDrawingResponse,
+  type PriceMasterItem,
   type Project,
 } from '@/lib/types';
 import { loadData, saveData } from '@/lib/storage';
@@ -127,6 +131,15 @@ function buildDrawingFromParseResponse(projectId: string, file: File, payload: P
       box: item.box,
     })),
     aiCandidates,
+    workTypeCandidates: (payload.workTypeCandidates || []).map((candidate) => ({
+      id: crypto.randomUUID(),
+      blockType: candidate.blockType,
+      label: candidate.label,
+      confidence: candidate.confidence,
+      reason: candidate.reason,
+      sourceTexts: candidate.sourceTexts,
+      requiresReview: candidate.requiresReview,
+    })),
     uploadedAt: new Date().toISOString(),
     lastParsedAt: new Date().toISOString(),
   };
@@ -165,6 +178,7 @@ export default function Home() {
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [hoveredCandidateId, setHoveredCandidateId] = useState<string | null>(null);
   const [activeOcrItemId, setActiveOcrItemId] = useState<string | null>(null);
+  const [masters, setMasters] = useState<PriceMasterItem[]>([]);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -175,6 +189,17 @@ export default function Home() {
       if (cancelled) return;
       setAppState(data);
       setInitialized(true);
+    })();
+
+    void (async () => {
+      try {
+        const items = await fetchMasters({ effectiveDate: new Date().toISOString().slice(0, 10) });
+        if (cancelled) return;
+        setMasters(items.length > 0 ? items : createSeedMasterItems());
+      } catch {
+        if (cancelled) return;
+        setMasters(createSeedMasterItems());
+      }
     })();
 
     return () => {
@@ -213,6 +238,31 @@ export default function Home() {
   }, [activeProject, appState]);
 
   const activeCandidateId = hoveredCandidateId ?? selectedCandidateId;
+  const reportBundle = useMemo(
+    () => {
+      if (!activeProject || !activeBlock) {
+        return {
+          estimateRows: [],
+          unitPriceEvidenceRows: [],
+          reviewIssues: [],
+          summary: {
+            totalAmount: 0,
+            totalRows: 0,
+            requiresReviewCount: 0,
+          },
+        };
+      }
+
+      return generateReportBundle({
+        project: activeProject,
+        block: activeBlock,
+        drawing: activeDrawing,
+        result: calculate(activeBlock),
+        masters,
+      });
+    },
+    [activeBlock, activeDrawing, activeProject, masters],
+  );
 
   const replaceActiveProject = useCallback((updater: (project: Project) => Project) => {
     setAppState((prev) => {
@@ -618,6 +668,12 @@ export default function Home() {
             </div>
 
             <CalculationResults result={result} block={activeBlock} />
+            <DocumentPanel
+              bundle={reportBundle}
+              drawing={activeDrawing}
+              projectName={activeProject.name}
+              estimateName={activeBlock.name}
+            />
           </div>
         </div>
       </div>

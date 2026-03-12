@@ -1,10 +1,22 @@
 export type BoundingBox = [number, number, number, number, number, number, number, number];
 
-export type BlockType = 'secondary_product';
+export type BlockType = 'secondary_product' | 'retaining_wall' | 'pavement' | 'demolition';
 export type ProjectStatus = 'draft' | 'active' | 'approved' | 'archived';
 export type DrawingStatus = 'idle' | 'uploaded' | 'processing' | 'ready' | 'error';
 export type DrawingFileType = 'pdf' | 'image';
 export type CandidateValueType = 'string' | 'number';
+export type MasterType =
+  | 'secondary_product'
+  | 'machine'
+  | 'dump_truck'
+  | 'crushed_stone'
+  | 'concrete'
+  | 'pump_truck'
+  | 'road'
+  | 'cutter'
+  | 'labor'
+  | 'misc';
+export type ReportSeverity = 'info' | 'warning' | 'critical';
 
 export interface OcrItem {
   id: string;
@@ -37,6 +49,84 @@ export interface AICandidate {
   requiresReview: boolean;
 }
 
+export interface WorkTypeCandidate {
+  id: string;
+  blockType: BlockType;
+  label: string;
+  confidence: number;
+  reason: string;
+  sourceTexts: string[];
+  requiresReview: boolean;
+}
+
+export interface PriceMasterItem {
+  id: string;
+  masterType: MasterType;
+  code: string;
+  name: string;
+  aliases: string[];
+  unitPrice: number;
+  unit: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  sourceName: string;
+  sourceVersion: string;
+  sourcePage: string | null;
+  vendor: string;
+  region: string;
+  notes: string;
+}
+
+export interface EstimateReportRow {
+  id: string;
+  section: string;
+  itemName: string;
+  specification: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  amount: number;
+  remarks: string;
+  sourceSummary: string;
+}
+
+export interface UnitPriceEvidenceRow {
+  id: string;
+  estimateRowId: string;
+  estimateItemName: string;
+  masterType: MasterType | 'input' | 'derived';
+  masterName: string;
+  adoptedUnitPrice: number;
+  unit: string;
+  sourceName: string;
+  sourceVersion: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  sourcePage: string | null;
+  reason: string;
+  requiresReview: boolean;
+}
+
+export interface ReviewIssue {
+  id: string;
+  severity: ReportSeverity;
+  title: string;
+  detail: string;
+  fieldName?: string;
+  sourcePage?: number;
+}
+
+export interface GeneratedReportBundle {
+  estimateRows: EstimateReportRow[];
+  unitPriceEvidenceRows: UnitPriceEvidenceRow[];
+  reviewIssues: ReviewIssue[];
+  summary: {
+    totalAmount: number;
+    totalRows: number;
+    requiresReviewCount: number;
+  };
+}
+
 export interface Drawing {
   id: string;
   projectId: string;
@@ -51,6 +141,7 @@ export interface Drawing {
   pages: DrawingPage[];
   ocrItems: OcrItem[];
   aiCandidates: AICandidate[];
+  workTypeCandidates: WorkTypeCandidate[];
   uploadedAt: string;
   lastParsedAt?: string;
   lastError?: string;
@@ -182,6 +273,14 @@ export interface ParseDrawingResponse {
     label?: string;
     valueType?: CandidateValueType;
   }>;
+  workTypeCandidates?: Array<{
+    blockType: BlockType;
+    label: string;
+    confidence: number;
+    reason: string;
+    sourceTexts: string[];
+    requiresReview: boolean;
+  }>;
   ocrLines: string[];
   ocrItems: Array<{
     text: string;
@@ -252,6 +351,7 @@ export function createDefaultDrawing(projectId: string, name: string = '図面�
     pages: [],
     ocrItems: [],
     aiCandidates: [],
+    workTypeCandidates: [],
     uploadedAt: new Date().toISOString(),
   };
 }

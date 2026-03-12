@@ -5,6 +5,7 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import EstimateReportPage from "./pages/EstimateReportPage";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import {
   ConcretePriceTable,
@@ -28,7 +29,7 @@ function Router() {
         <PlaceholderPage title="撤去工事の条件入力" />
       </Route>
       <Route path={"/estimates/secondary-product"}>
-        <PlaceholderPage title="二次製品の見積書" />
+        <EstimateReportPage />
       </Route>
       <Route path={"/estimates/retaining-wall"}>
         <PlaceholderPage title="擁壁の見積書" />
@@ -40,7 +41,7 @@ function Router() {
         <PlaceholderPage title="撤去工事の見積書" />
       </Route>
       <Route path={"/print"}>
-        <PlaceholderPage title="印刷" />
+        <EstimateReportPage />
       </Route>
       <Route path={"/price-tables/concrete"} component={ConcretePriceTable} />
       <Route path={"/price-tables/road"} component={RoadPriceTable} />
