@@ -1,0 +1,377 @@
+from __future__ import annotations
+
+import io
+import re
+import uuid
+from pathlib import Path
+from typing import Any
+
+import fitz
+import numpy as np
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from PIL import Image, ImageOps
+
+try:
+    from rapidocr import RapidOCR
+except ImportError:  # pragma: no cover - compatibility fallback
+    from rapidocr_onnxruntime import RapidOCR  # type: ignore
+
+BASE_DIR = Path(__file__).resolve().parent
+STORAGE_DIR = BASE_DIR / "storage"
+PREVIEW_DIR = STORAGE_DIR / "previews"
+PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+
+app = FastAPI(title="my-estimator OCR API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.mount("/files", StaticFiles(directory=str(STORAGE_DIR)), name="files")
+
+ocr_engine = RapidOCR()
+
+FIELD_LABELS = {
+    "secondaryProduct": "製品名",
+    "distance": "施工延長",
+    "currentHeight": "現況高",
+    "plannedHeight": "計画高",
+    "stages": "据付段数",
+    "productWidth": "製品幅",
+    "productHeight": "製品高さ",
+    "productLength": "製品長さ",
+    "baseThickness": "ベース厚",
+    "crushedStoneThickness": "砕石厚",
+}
+
+FULL_WIDTH_TRANS = str.maketrans({
+    "０": "0",
+    "１": "1",
+    "２": "2",
+    "３": "3",
+    "４": "4",
+    "５": "5",
+    "６": "6",
+    "７": "7",
+    "８": "8",
+    "９": "9",
+    "．": ".",
+    "－": "-",
+    "ー": "-",
+    "＋": "+",
+    "Ｌ": "L",
+    "ｍ": "m",
+    "Ｍ": "M",
+    "×": "x",
+    "Ｘ": "X",
+    "＊": "*",
+    "：": ":",
+    "　": " ",
+})
+
+
+def normalize_text(text: str) -> str:
+    return text.translate(FULL_WIDTH_TRANS).replace("＝", "=").replace("，", ",").strip()
+
+
+def flatten_box(points: Any) -> list[float]:
+    if isinstance(points, np.ndarray):
+        points = points.tolist()
+    if not isinstance(points, (list, tuple)):
+        raise ValueError("Invalid OCR box format")
+    if len(points) == 8:
+        return [float(value) for value in points]
+    if len(points) == 4 and all(isinstance(point, (list, tuple)) and len(point) >= 2 for point in points):
+        flattened: list[float] = []
+        for point in points:
+            flattened.extend([float(point[0]), float(point[1])])
+        return flattened
+    raise ValueError(f"Unsupported OCR box format: {points!r}")
+
+
+def extract_numeric_value(text: str, pattern: str) -> float | None:
+    match = re.search(pattern, normalize_text(text), flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def normalize_meters(value: float) -> float:
+    return round(value, 4)
+
+
+def normalize_maybe_millimeters(value: float) -> float:
+    if value >= 10:
+        return round(value / 1000, 4)
+    return round(value, 4)
+
+
+def build_candidate(field_name: str, source_text: str, source_page: int, source_box: list[float], value: str | float, reason: str, confidence: float, requires_review: bool) -> dict[str, Any]:
+    value_type = "number" if isinstance(value, (int, float)) else "string"
+    payload: dict[str, Any] = {
+        "label": FIELD_LABELS.get(field_name, field_name),
+        "confidence": confidence,
+        "sourceText": source_text,
+        "sourcePage": source_page,
+        "sourceBox": source_box,
+        "reason": reason,
+        "requiresReview": requires_review,
+        "valueType": value_type,
+    }
+    if value_type == "number":
+        payload["value"] = float(value)
+        payload["valueNumber"] = float(value)
+    else:
+        payload["value"] = str(value)
+        payload["valueText"] = str(value)
+    return payload
+
+
+def choose_candidate(existing: dict[str, Any] | None, candidate: dict[str, Any]) -> dict[str, Any]:
+    if not existing:
+        return candidate
+    if existing.get("value") != candidate.get("value"):
+        winner = candidate if candidate["confidence"] >= existing["confidence"] else existing
+        winner = dict(winner)
+        winner["requiresReview"] = True
+        winner["reason"] = f"候補衝突あり: {existing.get('sourceText')} / {candidate.get('sourceText')}"
+        winner["confidence"] = min(existing["confidence"], candidate["confidence"])
+        return winner
+    if candidate["confidence"] > existing["confidence"]:
+        return candidate
+    return existing
+
+
+def extract_candidates(ocr_items: list[dict[str, Any]]) -> dict[str, Any]:
+    candidates: dict[str, Any] = {}
+
+    for item in ocr_items:
+        source_text = item["text"]
+        normalized = normalize_text(source_text)
+        source_box = item["box"]
+        source_page = item["page"]
+
+        distance_match = re.search(r"(?:^|[^A-Za-z])L\s*[=:]?\s*(-?\d+(?:\.\d+)?)\s*(m)?", normalized, flags=re.IGNORECASE)
+        distance = float(distance_match.group(1)) if distance_match else None
+        if distance is not None:
+            candidates["distance"] = choose_candidate(
+                candidates.get("distance"),
+                build_candidate(
+                    "distance",
+                    source_text,
+                    source_page,
+                    source_box,
+                    normalize_meters(distance),
+                    "L=xxm の延長表記を抽出",
+                    min(0.97, item["score"]),
+                    False,
+                ),
+            )
+
+        stages = extract_numeric_value(normalized, r"(\d+)\s*段")
+        if stages is None:
+            stages = extract_numeric_value(normalized, r"^\s*(\d+)\s*[xX×]\s*$")
+        if stages is not None:
+            candidates["stages"] = choose_candidate(
+                candidates.get("stages"),
+                build_candidate("stages", source_text, source_page, source_box, int(stages), "段数表記を抽出", min(0.92, item["score"]), "段" not in normalized),
+            )
+
+        current_height = extract_numeric_value(normalized, r"(?:現況|現況高|GL)\s*[=:]?\s*(-?\d+(?:\.\d+)?)")
+        if current_height is not None:
+            candidates["currentHeight"] = choose_candidate(
+                candidates.get("currentHeight"),
+                build_candidate("currentHeight", source_text, source_page, source_box, normalize_meters(current_height), "現況高候補を抽出", min(0.88, item["score"]), False),
+            )
+
+        planned_height = extract_numeric_value(normalized, r"(?:計画|計画高|FH)\s*[=:]?\s*(-?\d+(?:\.\d+)?)")
+        if planned_height is not None:
+            candidates["plannedHeight"] = choose_candidate(
+                candidates.get("plannedHeight"),
+                build_candidate("plannedHeight", source_text, source_page, source_box, normalize_meters(planned_height), "計画高候補を抽出", min(0.88, item["score"]), False),
+            )
+
+        base_thickness = extract_numeric_value(normalized, r"(?:ベース厚|基礎厚)\s*[=:]?\s*(\d+(?:\.\d+)?)")
+        if base_thickness is not None:
+            candidates["baseThickness"] = choose_candidate(
+                candidates.get("baseThickness"),
+                build_candidate("baseThickness", source_text, source_page, source_box, normalize_maybe_millimeters(base_thickness), "ベース厚表記を抽出", min(0.86, item["score"]), False),
+            )
+
+        crushed_stone_thickness = extract_numeric_value(normalized, r"(?:砕石厚|砕石厚さ)\s*[=:]?\s*(\d+(?:\.\d+)?)")
+        if crushed_stone_thickness is not None:
+            candidates["crushedStoneThickness"] = choose_candidate(
+                candidates.get("crushedStoneThickness"),
+                build_candidate("crushedStoneThickness", source_text, source_page, source_box, normalize_maybe_millimeters(crushed_stone_thickness), "砕石厚表記を抽出", min(0.86, item["score"]), False),
+            )
+
+        dimension_match = re.search(r"(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)", normalized)
+        if dimension_match:
+            width, height, length = [normalize_maybe_millimeters(float(value)) for value in dimension_match.groups()]
+            candidates["productWidth"] = choose_candidate(
+                candidates.get("productWidth"),
+                build_candidate("productWidth", source_text, source_page, source_box, width, "寸法表記から製品幅を推定", min(0.82, item["score"]), True),
+            )
+            candidates["productHeight"] = choose_candidate(
+                candidates.get("productHeight"),
+                build_candidate("productHeight", source_text, source_page, source_box, height, "寸法表記から製品高さを推定", min(0.82, item["score"]), True),
+            )
+            candidates["productLength"] = choose_candidate(
+                candidates.get("productLength"),
+                build_candidate("productLength", source_text, source_page, source_box, f"{length:g}", "寸法表記から製品長さを推定", min(0.82, item["score"]), True),
+            )
+
+        if re.search(r"U字溝|側溝|マンホール|コネクトホール|縁石|街渠|桝", source_text):
+            candidates["secondaryProduct"] = choose_candidate(
+                candidates.get("secondaryProduct"),
+                build_candidate("secondaryProduct", source_text, source_page, source_box, source_text.strip(), "製品名らしい文字列を抽出", min(0.74, item["score"]), True),
+            )
+
+    return candidates
+
+
+def pil_to_numpy(image: Image.Image) -> np.ndarray:
+    return np.array(image.convert("RGB"))
+
+
+def render_pdf_pages(file_bytes: bytes) -> list[Image.Image]:
+    document = fitz.open(stream=file_bytes, filetype="pdf")
+    pages: list[Image.Image] = []
+    for page in document:
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+        pages.append(Image.open(io.BytesIO(pixmap.tobytes("png"))).convert("RGB"))
+    return pages
+
+
+def load_image_pages(file_bytes: bytes) -> list[Image.Image]:
+    image = Image.open(io.BytesIO(file_bytes))
+    return [ImageOps.exif_transpose(image).convert("RGB")]
+
+
+def run_ocr_on_page(image: Image.Image, page_no: int) -> list[dict[str, Any]]:
+    raw_result = ocr_engine(pil_to_numpy(image))
+    items: list[dict[str, Any]] = []
+
+    if hasattr(raw_result, "boxes") and hasattr(raw_result, "txts"):
+        boxes_attr = getattr(raw_result, "boxes", None)
+        texts_attr = getattr(raw_result, "txts", None)
+        scores_attr = getattr(raw_result, "scores", None)
+        boxes = list(boxes_attr) if boxes_attr is not None else []
+        texts = list(texts_attr) if texts_attr is not None else []
+        scores = list(scores_attr) if scores_attr is not None else []
+        entries = zip(boxes, texts, scores)
+    elif isinstance(raw_result, tuple) and raw_result:
+        legacy_entries = raw_result[0]
+        entries = legacy_entries or []
+    else:
+        entries = []
+
+    for entry in entries:
+        if isinstance(entry, tuple) and len(entry) == 3 and not hasattr(raw_result, "boxes"):
+            box_data, text_data, score_data = entry
+        else:
+            try:
+                box_data, text_data, score_data = entry
+            except (TypeError, ValueError):
+                continue
+        try:
+            box = flatten_box(box_data)
+        except ValueError:
+            continue
+        text = str(text_data).strip()
+        if not text:
+            continue
+        score = float(score_data) if score_data is not None else 0.0
+        items.append({
+            "text": text,
+            "score": round(score, 4),
+            "box": box,
+            "page": page_no,
+        })
+    return items
+
+
+def save_preview_image(image: Image.Image) -> str:
+    file_name = f"{uuid.uuid4().hex}.png"
+    file_path = PREVIEW_DIR / file_name
+    image.save(file_path, format="PNG")
+    return file_name
+
+
+def build_image_url(request: Request, relative_path: str) -> str:
+    return f"{str(request.base_url).rstrip('/')}/files/{relative_path}"
+
+
+@app.get("/health")
+def health() -> dict[str, Any]:
+    return {"success": True, "status": "ok"}
+
+
+@app.post("/api/ocr/parse-drawing")
+async def parse_drawing(
+    request: Request,
+    file: UploadFile = File(...),
+    mode: str = Form("secondary_product"),
+) -> dict[str, Any]:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="ファイル名がありません")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="空ファイルは解析できません")
+    if len(file_bytes) > 30 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="ファイルサイズが上限を超えています")
+
+    content_type = file.content_type or "application/octet-stream"
+    file_type = "pdf" if content_type == "application/pdf" or file.filename.lower().endswith(".pdf") else "image"
+    if file_type not in {"pdf", "image"}:
+        raise HTTPException(status_code=400, detail="対応していないファイル形式です")
+
+    try:
+        pages = render_pdf_pages(file_bytes) if file_type == "pdf" else load_image_pages(file_bytes)
+    except Exception as exc:  # pragma: no cover - depends on user input
+        raise HTTPException(status_code=422, detail=f"図面の読み込みに失敗しました: {exc}") from exc
+
+    all_ocr_items: list[dict[str, Any]] = []
+    page_previews: list[dict[str, Any]] = []
+
+    for index, page_image in enumerate(pages, start=1):
+        preview_file_name = save_preview_image(page_image)
+        page_previews.append({
+            "imageUrl": build_image_url(request, f"previews/{preview_file_name}"),
+            "width": page_image.width,
+            "height": page_image.height,
+            "page": index,
+        })
+        all_ocr_items.extend(run_ocr_on_page(page_image, index))
+
+    ai_candidates = extract_candidates(all_ocr_items) if mode == "secondary_product" else {}
+
+    return {
+        "drawingSource": {
+            "fileName": file.filename,
+            "fileType": file_type,
+            "pageCount": len(pages),
+        },
+        "aiCandidates": ai_candidates,
+        "ocrLines": [item["text"] for item in all_ocr_items],
+        "ocrItems": all_ocr_items,
+        "pagePreview": page_previews[0] if page_previews else None,
+        "pagePreviews": page_previews,
+        "debug": {
+            "ocr_line_count": len(all_ocr_items),
+            "mode": mode,
+        },
+    }

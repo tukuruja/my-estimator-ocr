@@ -1,26 +1,93 @@
-// 見積ブロック（1つの見積項目）
-export interface EstimateBlock {
+export type BoundingBox = [number, number, number, number, number, number, number, number];
+
+export type BlockType = 'secondary_product';
+export type ProjectStatus = 'draft' | 'active' | 'approved' | 'archived';
+export type DrawingStatus = 'idle' | 'uploaded' | 'processing' | 'ready' | 'error';
+export type DrawingFileType = 'pdf' | 'image';
+export type CandidateValueType = 'string' | 'number';
+
+export interface OcrItem {
+  id: string;
+  pageNo: number;
+  text: string;
+  score: number;
+  box: BoundingBox;
+}
+
+export interface DrawingPage {
+  id: string;
+  pageNo: number;
+  imageUrl: string;
+  width: number;
+  height: number;
+}
+
+export interface AICandidate {
+  id: string;
+  fieldName: string;
+  label: string;
+  valueType: CandidateValueType;
+  valueText?: string;
+  valueNumber?: number;
+  confidence: number;
+  sourceText: string;
+  sourcePage: number;
+  sourceBox: BoundingBox;
+  reason: string;
+  requiresReview: boolean;
+}
+
+export interface Drawing {
+  id: string;
+  projectId: string;
+  name: string;
+  drawingNo: string;
+  drawingTitle: string;
+  revision: string;
+  fileName: string;
+  fileType: DrawingFileType;
+  status: DrawingStatus;
+  pageCount: number;
+  pages: DrawingPage[];
+  ocrItems: OcrItem[];
+  aiCandidates: AICandidate[];
+  uploadedAt: string;
+  lastParsedAt?: string;
+  lastError?: string;
+}
+
+export interface Project {
   id: string;
   name: string;
-  // 二次製品入力
+  clientName: string;
+  siteName: string;
+  status: ProjectStatus;
+  drawings: Drawing[];
+  blocks: EstimateBlock[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EstimateBlock {
+  id: string;
+  projectId: string;
+  drawingId: string | null;
+  blockType: BlockType;
+  name: string;
   secondaryProduct: string;
   distance: number;
   currentHeight: number;
   plannedHeight: number;
   laborCost: number;
   stages: number;
-  // 土工事関連
   machine: string;
   dumpTruck: string;
-  // 砕石関連
   crushedStone: string;
   crushedStoneThickness: number;
-  // ベース関連
   concrete: string;
   pumpTruck: string;
   baseThickness: number;
   formworkCost: number;
-  // 二次製品関連
   productWidth: number;
   productHeight: number;
   productLength: string;
@@ -28,25 +95,11 @@ export interface EstimateBlock {
   workabilityFactor: string;
   sandCost: number;
   shippingCost: number;
+  requiresReviewFields: string[];
+  appliedCandidateIds: string[];
 }
 
-// 単価表アイテム
-export interface PriceItem {
-  id: string;
-  name: string;
-  price: number;
-}
-
-// 機械単価表
-export interface MachinePrice {
-  id: string;
-  name: string;
-  price: number;
-}
-
-// 計算結果
 export interface CalculationResult {
-  // 掘削
   excavationWidth: number;
   excavationHeight: number;
   excavationVolume: number;
@@ -58,7 +111,6 @@ export interface CalculationResult {
   machineAmount: number;
   excavationConstructionAmount: number;
   excavationUnitPerM: number;
-  // 残土搬出
   soilRemovalVolume: number;
   soilRemovalDays: number;
   dumpCapacity: number;
@@ -68,12 +120,10 @@ export interface CalculationResult {
   regularDumpUnitPrice: number;
   soilRemovalAmount: number;
   soilRemovalUnitPerM: number;
-  // 埋め戻し
   backfillVolume: number;
   backfillDays: number;
   backfillWorkers: number;
   backfillLaborCost: number;
-  // 砕石関連
   crushedStoneVolume: number;
   crushedStoneWorkers: number;
   crushedStoneDays: number;
@@ -83,7 +133,6 @@ export interface CalculationResult {
   crushedStoneMaterialCost: number;
   crushedStoneTotal: number;
   crushedStoneUnitPerM: number;
-  // ベース関連
   baseWidth: number;
   baseConcreteVolume: number;
   concreteUnitPrice: number;
@@ -92,7 +141,6 @@ export interface CalculationResult {
   formworkMaterialCost: number;
   baseTotalAmount: number;
   baseUnitPerM: number;
-  // 二次製品関連
   mortar: number;
   sand: number;
   sandAmount: number;
@@ -107,17 +155,61 @@ export interface CalculationResult {
   secondaryProductUnitPerM: number;
 }
 
-// アプリ全体の状態
 export interface AppState {
-  blocks: EstimateBlock[];
-  activeBlockIndex: number;
+  projects: Project[];
+  activeProjectId: string;
+  activeDrawingId: string | null;
+  activeBlockId: string | null;
   autoSave: boolean;
 }
 
-// デフォルトの見積ブロック
-export function createDefaultBlock(name: string = '新規見積'): EstimateBlock {
+export interface ParseDrawingResponse {
+  drawingSource: {
+    fileName: string;
+    fileType: DrawingFileType;
+    pageCount: number;
+  };
+  aiCandidates: Record<string, {
+    value?: string | number;
+    valueText?: string;
+    valueNumber?: number;
+    confidence: number;
+    sourceText: string;
+    sourcePage: number;
+    sourceBox: BoundingBox;
+    reason: string;
+    requiresReview: boolean;
+    label?: string;
+    valueType?: CandidateValueType;
+  }>;
+  ocrLines: string[];
+  ocrItems: Array<{
+    text: string;
+    score: number;
+    page: number;
+    box: BoundingBox;
+  }>;
+  pagePreview: {
+    imageUrl: string;
+    width: number;
+    height: number;
+    page: number;
+  };
+  pagePreviews?: Array<{
+    imageUrl: string;
+    width: number;
+    height: number;
+    page: number;
+  }>;
+  debug?: Record<string, unknown>;
+}
+
+export function createDefaultBlock(projectId: string, name: string = '新規見積', drawingId: string | null = null): EstimateBlock {
   return {
     id: crypto.randomUUID(),
+    projectId,
+    drawingId,
+    blockType: 'secondary_product',
     name,
     secondaryProduct: '',
     distance: 0,
@@ -140,5 +232,53 @@ export function createDefaultBlock(name: string = '新規見積'): EstimateBlock
     workabilityFactor: '',
     sandCost: 0,
     shippingCost: 0,
+    requiresReviewFields: [],
+    appliedCandidateIds: [],
+  };
+}
+
+export function createDefaultDrawing(projectId: string, name: string = '図面未登録'): Drawing {
+  return {
+    id: crypto.randomUUID(),
+    projectId,
+    name,
+    drawingNo: '',
+    drawingTitle: name,
+    revision: 'A',
+    fileName: '',
+    fileType: 'pdf',
+    status: 'idle',
+    pageCount: 0,
+    pages: [],
+    ocrItems: [],
+    aiCandidates: [],
+    uploadedAt: new Date().toISOString(),
+  };
+}
+
+export function createDefaultProject(name: string = '案件 1'): Project {
+  const projectId = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  return {
+    id: projectId,
+    name,
+    clientName: '',
+    siteName: '',
+    status: 'draft',
+    drawings: [],
+    blocks: [createDefaultBlock(projectId, `${name} 見積 1`)],
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+export function createInitialAppState(): AppState {
+  const project = createDefaultProject();
+  return {
+    projects: [project],
+    activeProjectId: project.id,
+    activeDrawingId: null,
+    activeBlockId: project.blocks[0]?.id ?? null,
+    autoSave: true,
   };
 }

@@ -109,3 +109,5 @@ temp/
 .manus-logs/
 .webdev/
 .vercel
+ai_api/.venv/
+ai_api/storage/previews/
