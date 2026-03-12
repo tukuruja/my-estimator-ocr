@@ -27,7 +27,33 @@ export function getAiApiUnavailableMessage(): string {
 }
 
 export function getServerApiUnavailableMessage(): string {
-  return `この公開 preview には単価・帳票 API が接続されていません。ローカル版 ${LOCAL_APP_URL} を使うか、Express API を同時に公開してください。`;
+  return `この公開 preview には単価・帳票 API が接続されていません。ローカル版 ${LOCAL_APP_URL} を使うか、VITE_APP_API_BASE_URL に HTTPS の Express API を設定してください。`;
+}
+
+export function getAppApiBaseUrl(): string | null {
+  const envUrl = import.meta.env.VITE_APP_API_BASE_URL?.trim();
+  if (envUrl) {
+    return envUrl.replace(/\/$/, '');
+  }
+  if (isLocalAppOrigin()) {
+    return '';
+  }
+  return null;
+}
+
+export function isAppApiAvailable(): boolean {
+  return getAppApiBaseUrl() !== null;
+}
+
+export function resolveAppApiUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) {
+    return path;
+  }
+  const baseUrl = getAppApiBaseUrl();
+  if (baseUrl === null) {
+    throw new Error(getServerApiUnavailableMessage());
+  }
+  return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 export function getAiApiBaseUrl(): string | null {
@@ -115,7 +141,7 @@ export async function fetchMasters(query: {
   if (query.keyword) params.set('keyword', query.keyword);
   if (query.effectiveDate) params.set('effectiveDate', query.effectiveDate);
 
-  const url = `/api/masters${params.toString() ? `?${params.toString()}` : ''}`;
+  const url = resolveAppApiUrl(`/api/masters${params.toString() ? `?${params.toString()}` : ''}`);
   try {
     const response = await fetch(url);
     await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), '単価マスタの取得に失敗しました。');
@@ -134,7 +160,7 @@ export async function fetchMasters(query: {
 
 export async function saveMasters(items: PriceMasterItem[]): Promise<PriceMasterItem[]> {
   try {
-    const response = await fetch('/api/masters', {
+    const response = await fetch(resolveAppApiUrl('/api/masters'), {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -157,7 +183,7 @@ export async function saveMasters(items: PriceMasterItem[]): Promise<PriceMaster
 
 export async function generateReport(request: ReportGenerationRequest): Promise<GeneratedReportBundle> {
   try {
-    const response = await fetch('/api/reports/generate', {
+    const response = await fetch(resolveAppApiUrl('/api/reports/generate'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

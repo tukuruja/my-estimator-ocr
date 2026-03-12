@@ -1,5 +1,6 @@
 import type { AppState, EstimateBlock, Project } from './types';
 import { createDefaultBlock, createDefaultProject, createInitialAppState } from './types';
+import { resolveAppApiUrl } from './api';
 
 const LEGACY_STORAGE_KEY = 'my-estimator-data';
 const UI_STORAGE_KEY = 'my-estimator-ui-meta';
@@ -162,7 +163,7 @@ function saveUiMeta(data: AppState): void {
 
 async function loadServerProjects(): Promise<Project[] | null> {
   try {
-    const response = await fetch('/api/app-state');
+    const response = await fetch(resolveAppApiUrl('/api/app-state'));
     if (!response.ok) {
       return null;
     }
@@ -181,7 +182,7 @@ async function loadServerProjects(): Promise<Project[] | null> {
 }
 
 async function saveServerProjects(projects: Project[]): Promise<void> {
-  const response = await fetch('/api/app-state', {
+  const response = await fetch(resolveAppApiUrl('/api/app-state'), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
