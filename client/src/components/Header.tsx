@@ -86,7 +86,7 @@ export default function Header() {
     <header className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between sticky top-0 z-50">
       <div>
         <div className="text-lg font-bold text-indigo-700">土木見積サポート</div>
-        <div className="text-[11px] text-gray-500">二次製品工事の条件入力と概算試算</div>
+        <div className="text-[11px] text-gray-500">工種別の条件入力と OCR 根拠付き概算見積</div>
       </div>
       <nav className="flex items-center gap-2">
         <NavButton

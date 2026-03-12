@@ -17,6 +17,7 @@ export type MasterType =
   | 'labor'
   | 'misc';
 export type ReportSeverity = 'info' | 'warning' | 'critical';
+export type MetricValueKind = 'number' | 'currency';
 
 export interface OcrItem {
   id: string;
@@ -186,8 +187,55 @@ export interface EstimateBlock {
   workabilityFactor: string;
   sandCost: number;
   shippingCost: number;
+  pavementWidth: number;
+  surfaceThickness: number;
+  binderThickness: number;
+  demolitionWidth: number;
+  demolitionThickness: number;
   requiresReviewFields: string[];
   appliedCandidateIds: string[];
+}
+
+export interface CalculationMetricRow {
+  label: string;
+  value: number;
+  unit?: string;
+  valueKind?: MetricValueKind;
+}
+
+export interface CalculationDetailSection {
+  id: string;
+  title: string;
+  tone: string;
+  metrics: CalculationMetricRow[];
+}
+
+export interface CalculationLineItem {
+  key: string;
+  section: string;
+  itemName: string;
+  specification: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  amount: number;
+  remarks: string;
+}
+
+export interface CalculationEvidence {
+  lineItemKey: string;
+  estimateItemName: string;
+  masterType: MasterType | 'input' | 'derived';
+  masterName: string;
+  adoptedUnitPrice: number;
+  unit: string;
+  sourceName: string;
+  sourceVersion: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  sourcePage: string | null;
+  reason: string;
+  requiresReview: boolean;
 }
 
 export interface CalculationResult {
@@ -244,6 +292,15 @@ export interface CalculationResult {
   installWorkers: number;
   secondaryProductTotal: number;
   secondaryProductUnitPerM: number;
+  workType: BlockType;
+  displayName: string;
+  primaryQuantity: number;
+  primaryUnit: string;
+  totalAmount: number;
+  totalAmountPerPrimaryUnit: number;
+  detailSections: CalculationDetailSection[];
+  lineItems: CalculationLineItem[];
+  priceEvidence: CalculationEvidence[];
 }
 
 export interface AppState {
@@ -303,6 +360,16 @@ export interface ParseDrawingResponse {
   debug?: Record<string, unknown>;
 }
 
+export interface ReportGenerationRequest {
+  projectId?: string;
+  blockId?: string;
+  drawingId?: string | null;
+  effectiveDate?: string;
+  project?: Project;
+  block?: EstimateBlock;
+  drawing?: Drawing | null;
+}
+
 export function createDefaultBlock(projectId: string, name: string = '新規見積', drawingId: string | null = null): EstimateBlock {
   return {
     id: crypto.randomUUID(),
@@ -331,6 +398,11 @@ export function createDefaultBlock(projectId: string, name: string = '新規見�
     workabilityFactor: '',
     sandCost: 0,
     shippingCost: 0,
+    pavementWidth: 0,
+    surfaceThickness: 0,
+    binderThickness: 0,
+    demolitionWidth: 0,
+    demolitionThickness: 0,
     requiresReviewFields: [],
     appliedCandidateIds: [],
   };

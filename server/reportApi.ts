@@ -1,0 +1,91 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
+import { calculate } from '../client/src/lib/calculations';
+import { generateReportBundle } from '../client/src/lib/reporting';
+import type { Drawing, EstimateBlock, Project, ReportGenerationRequest } from '../client/src/lib/types';
+import { getProjectById } from './appStateStore';
+import { listMasterItems } from './masterStore';
+
+type Next = (err?: unknown) => void;
+
+function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(payload));
+}
+
+async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  if (chunks.length === 0) {
+    return {} as T;
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf-8')) as T;
+}
+
+async function resolveContext(body: ReportGenerationRequest): Promise<{ project: Project; block: EstimateBlock; drawing: Drawing | null; effectiveDate: string }> {
+  const effectiveDate = body.effectiveDate ?? new Date().toISOString().slice(0, 10);
+
+  if (body.project && body.block) {
+    return {
+      project: body.project,
+      block: body.block,
+      drawing: body.drawing ?? null,
+      effectiveDate,
+    };
+  }
+
+  if (!body.projectId || !body.blockId) {
+    throw new Error('帳票生成には project/block のスナップショット、または projectId/blockId が必要です。');
+  }
+
+  const project = await getProjectById(body.projectId);
+  if (!project) {
+    throw new Error('案件が見つかりません。');
+  }
+
+  const block = project.blocks.find((item) => item.id === body.blockId);
+  if (!block) {
+    throw new Error('見積ブロックが見つかりません。');
+  }
+
+  const drawing = project.drawings.find((item) => item.id === (body.drawingId ?? block.drawingId ?? '')) ?? null;
+  return { project, block, drawing, effectiveDate };
+}
+
+async function handleReportApi(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  if ((req.method || 'GET') !== 'POST' || pathname !== '/api/reports/generate') {
+    return false;
+  }
+
+  const body = await readJsonBody<ReportGenerationRequest>(req);
+  const { project, block, drawing, effectiveDate } = await resolveContext(body);
+  const masters = await listMasterItems({ effectiveDate });
+  const result = calculate(block, { masters, effectiveDate });
+  const bundle = generateReportBundle({ project, block, drawing, result });
+
+  sendJson(res, 200, { success: true, data: bundle });
+  return true;
+}
+
+export function createReportApiMiddleware() {
+  return (req: IncomingMessage, res: ServerResponse, next: Next) => {
+    handleReportApi(req, res)
+      .then((handled) => {
+        if (!handled) {
+          next();
+        }
+      })
+      .catch((error) => {
+        sendJson(res, 500, {
+          success: false,
+          error: {
+            message: error instanceof Error ? error.message : '帳票生成に失敗しました。',
+          },
+        });
+      });
+  };
+}

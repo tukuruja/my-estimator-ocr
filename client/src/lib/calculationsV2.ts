@@ -661,5 +661,14 @@ export function calculateV2(block: EstimateBlockV2): CalculationResultV2 {
     laborRatio,
     materialRatio,
     machineRatio,
+    workType:                      'secondary_product',
+    displayName:                   block.secondaryProduct || '二次製品工',
+    primaryQuantity:               distance,
+    primaryUnit:                   'm',
+    totalAmount:                   Math.ceil(grandTotal),
+    totalAmountPerPrimaryUnit:     grandTotalPerM,
+    detailSections:                [],
+    lineItems:                     [],
+    priceEvidence:                 [],
   };
 }

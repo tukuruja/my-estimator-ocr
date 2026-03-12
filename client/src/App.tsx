@@ -1,54 +1,55 @@
-import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
-import ErrorBoundary from "./components/ErrorBoundary";
-import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
-import EstimateReportPage from "./pages/EstimateReportPage";
-import PlaceholderPage from "./pages/PlaceholderPage";
+import { Toaster } from '@/components/ui/sonner';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import NotFound from '@/pages/NotFound';
+import { Route, Switch } from 'wouter';
+import ErrorBoundary from './components/ErrorBoundary';
+import { ThemeProvider } from './contexts/ThemeContext';
+import Home from './pages/Home';
+import EstimateReportPage from './pages/EstimateReportPage';
 import {
   ConcretePriceTable,
   RoadPriceTable,
   SecondaryPriceTable,
   MachinesPriceTable,
   CutterPriceTable,
-} from "./pages/PriceTablePages";
+} from './pages/PriceTablePages';
 
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/retaining-wall-input"}>
-        <PlaceholderPage title="擁壁の条件入力" />
+      <Route path={'/'}>
+        <Home preferredBlockType="secondary_product" />
       </Route>
-      <Route path={"/pavement-input"}>
-        <PlaceholderPage title="舗装の条件入力" />
+      <Route path={'/retaining-wall-input'}>
+        <Home preferredBlockType="retaining_wall" />
       </Route>
-      <Route path={"/demolition-input"}>
-        <PlaceholderPage title="撤去工事の条件入力" />
+      <Route path={'/pavement-input'}>
+        <Home preferredBlockType="pavement" />
       </Route>
-      <Route path={"/estimates/secondary-product"}>
+      <Route path={'/demolition-input'}>
+        <Home preferredBlockType="demolition" />
+      </Route>
+      <Route path={'/estimates/secondary-product'}>
+        <EstimateReportPage preferredBlockType="secondary_product" />
+      </Route>
+      <Route path={'/estimates/retaining-wall'}>
+        <EstimateReportPage preferredBlockType="retaining_wall" />
+      </Route>
+      <Route path={'/estimates/pavement'}>
+        <EstimateReportPage preferredBlockType="pavement" />
+      </Route>
+      <Route path={'/estimates/demolition'}>
+        <EstimateReportPage preferredBlockType="demolition" />
+      </Route>
+      <Route path={'/print'}>
         <EstimateReportPage />
       </Route>
-      <Route path={"/estimates/retaining-wall"}>
-        <PlaceholderPage title="擁壁の見積書" />
-      </Route>
-      <Route path={"/estimates/pavement"}>
-        <PlaceholderPage title="舗装の見積書" />
-      </Route>
-      <Route path={"/estimates/demolition"}>
-        <PlaceholderPage title="撤去工事の見積書" />
-      </Route>
-      <Route path={"/print"}>
-        <EstimateReportPage />
-      </Route>
-      <Route path={"/price-tables/concrete"} component={ConcretePriceTable} />
-      <Route path={"/price-tables/road"} component={RoadPriceTable} />
-      <Route path={"/price-tables/secondary"} component={SecondaryPriceTable} />
-      <Route path={"/price-tables/machines"} component={MachinesPriceTable} />
-      <Route path={"/price-tables/cutter"} component={CutterPriceTable} />
-      <Route path={"/404"} component={NotFound} />
+      <Route path={'/price-tables/concrete'} component={ConcretePriceTable} />
+      <Route path={'/price-tables/road'} component={RoadPriceTable} />
+      <Route path={'/price-tables/secondary'} component={SecondaryPriceTable} />
+      <Route path={'/price-tables/machines'} component={MachinesPriceTable} />
+      <Route path={'/price-tables/cutter'} component={CutterPriceTable} />
+      <Route path={'/404'} component={NotFound} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -5,8 +5,8 @@ export function ConcretePriceTable() {
   return (
     <PriceTable
       title="生コン・廃材処理単価表"
-      masterTypes={['concrete']}
-      description="生コン・モルタルなどの材料単価を管理します。見積書のベース工事欄の根拠として利用されます。"
+      masterTypes={['concrete', 'misc']}
+      description="生コン、モルタル、産廃処分、補助材料などの単価を管理します。擁壁工・撤去工・二次製品工の根拠として利用されます。"
     />
   );
 }

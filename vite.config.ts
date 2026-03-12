@@ -7,6 +7,7 @@ import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
 import { createAppStateApiMiddleware } from "./server/appStateApi";
 import { createMasterApiMiddleware } from "./server/masterApi";
+import { createReportApiMiddleware } from "./server/reportApi";
 
 // =============================================================================
 // Manus Debug Collector - Vite Plugin
@@ -157,6 +158,7 @@ function vitePluginProjectStateApi(): Plugin {
     name: "project-state-api",
     configureServer(server) {
       server.middlewares.use(createMasterApiMiddleware());
+      server.middlewares.use(createReportApiMiddleware());
       server.middlewares.use(createAppStateApiMiddleware());
     },
   };

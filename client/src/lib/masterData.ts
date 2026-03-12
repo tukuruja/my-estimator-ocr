@@ -32,6 +32,15 @@ const cutterMasterSeeds = [
   { name: 'カッター入れ Co t=20cm', price: 1500 },
 ];
 
+const miscMasterSeeds = [
+  { name: 'セメント単価', price: 600, unit: '袋', notes: 'モルタル用セメント袋単価', code: 'MISC-CEMENT-BAG' },
+  { name: '砂単価（初期値）', price: 0, unit: 'm3', notes: '画面入力で上書きする初期値', code: 'MISC-SAND-INPUT' },
+  { name: 'As殻処分', price: 7000, unit: 'm3', notes: 'アスファルト殻の運搬・処分単価', code: 'MISC-AS-DISPOSAL' },
+  { name: 'Co殻処分', price: 12000, unit: 'm3', notes: 'コンクリート殻の運搬・処分単価', code: 'MISC-CO-DISPOSAL' },
+  { name: 'コンクリート撤去 t=15cm', price: 9500, unit: 'm2', notes: '無筋コンクリート撤去単価', code: 'MISC-CO-DEMO-15' },
+  { name: 'コンクリート撤去 t=20cm', price: 12500, unit: 'm2', notes: 'コンクリート構造物撤去単価', code: 'MISC-CO-DEMO-20' },
+];
+
 function slugify(input: string): string {
   return input
     .toLowerCase()
@@ -108,14 +117,12 @@ export function createSeedMasterItems(): PriceMasterItem[] {
     code: 'LABOR-STANDARD',
     notes: '既定の標準労務単価',
   }));
-  items.push(createMasterItem('misc', 'セメント単価', 600, '袋', {
-    code: 'MISC-CEMENT-BAG',
-    notes: 'モルタル用セメント袋単価',
-  }));
-  items.push(createMasterItem('misc', '砂単価（初期値）', 0, 'm3', {
-    code: 'MISC-SAND-INPUT',
-    notes: '画面入力で上書きする初期値',
-  }));
+  for (const item of miscMasterSeeds) {
+    items.push(createMasterItem('misc', item.name, item.price, item.unit, {
+      code: item.code,
+      notes: item.notes,
+    }));
+  }
 
   return items;
 }

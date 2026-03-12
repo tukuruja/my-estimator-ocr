@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderKanban, Plus, Workflow } from 'lucide-react';
 import Header from '@/components/Header';
 import EstimateList from '@/components/EstimateList';
@@ -8,35 +8,53 @@ import SaveBar from '@/components/SaveBar';
 import OcrReviewPanel from '@/components/OcrReviewPanel';
 import DocumentPanel from '@/components/DocumentPanel';
 import { calculate } from '@/lib/calculations';
-import { fetchMasters, parseDrawing } from '@/lib/api';
+import { fetchMasters, generateReport, parseDrawing } from '@/lib/api';
 import { createSeedMasterItems } from '@/lib/masterData';
-import { generateReportBundle } from '@/lib/reporting';
 import {
   createDefaultBlock,
   createDefaultProject,
   createInitialAppState,
   type AICandidate,
   type AppState,
+  type BlockType,
   type Drawing,
   type EstimateBlock,
+  type GeneratedReportBundle,
   type ParseDrawingResponse,
   type PriceMasterItem,
   type Project,
 } from '@/lib/types';
 import { loadData, saveData } from '@/lib/storage';
+import { getWorkTypeLabel } from '@/lib/workTypes';
 import { toast } from 'sonner';
 
 const CANDIDATE_LABELS: Record<string, string> = {
-  secondaryProduct: '製品名',
+  secondaryProduct: '対象名',
   distance: '施工延長',
   currentHeight: '現況高',
   plannedHeight: '計画高',
   stages: '据付段数',
-  productWidth: '製品幅',
-  productHeight: '製品高さ',
+  productWidth: '製品幅 / 底版幅',
+  productHeight: '製品高さ / 擁壁高',
   productLength: '製品長さ',
-  crushedStoneThickness: '砕石厚',
-  baseThickness: 'ベース厚',
+  crushedStoneThickness: '砕石厚 / 下層路盤厚',
+  baseThickness: 'ベース厚 / 路盤厚',
+  pavementWidth: '舗装幅',
+  surfaceThickness: '表層厚',
+  binderThickness: '基層厚',
+  demolitionWidth: '撤去幅',
+  demolitionThickness: '撤去厚',
+};
+
+const EMPTY_REPORT_BUNDLE: GeneratedReportBundle = {
+  estimateRows: [],
+  unitPriceEvidenceRows: [],
+  reviewIssues: [],
+  summary: {
+    totalAmount: 0,
+    totalRows: 0,
+    requiresReviewCount: 0,
+  },
 };
 
 function GuideStep({ step, title, description }: { step: string; title: string; description: string }) {
@@ -49,29 +67,17 @@ function GuideStep({ step, title, description }: { step: string; title: string; 
   );
 }
 
-function ProjectCard({
-  project,
-  isActive,
-  onSelect,
-}: {
-  project: Project;
-  isActive: boolean;
-  onSelect: () => void;
-}) {
+function ProjectCard({ project, isActive, onSelect }: { project: Project; isActive: boolean; onSelect: () => void }) {
   return (
     <button
       type="button"
       onClick={onSelect}
       className={`rounded-lg border px-3 py-2 text-left transition-colors ${
-        isActive
-          ? 'border-indigo-300 bg-indigo-50 text-indigo-900'
-          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+        isActive ? 'border-indigo-300 bg-indigo-50 text-indigo-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
       }`}
     >
       <div className="text-sm font-semibold">{project.name}</div>
-      <div className="mt-1 text-[11px] text-slate-500">
-        図面 {project.drawings.length} 件 / 見積 {project.blocks.length} 件
-      </div>
+      <div className="mt-1 text-[11px] text-slate-500">図面 {project.drawings.length} 件 / 見積 {project.blocks.length} 件</div>
     </button>
   );
 }
@@ -81,13 +87,10 @@ function updateProjectCollection(projects: Project[], projectId: string, updater
 }
 
 function buildDrawingFromParseResponse(projectId: string, file: File, payload: ParseDrawingResponse): Drawing {
-  const previews = payload.pagePreviews && payload.pagePreviews.length > 0
-    ? payload.pagePreviews
-    : [payload.pagePreview];
+  const previews = payload.pagePreviews && payload.pagePreviews.length > 0 ? payload.pagePreviews : [payload.pagePreview];
 
   const aiCandidates: AICandidate[] = Object.entries(payload.aiCandidates || {}).map(([fieldName, candidate]) => {
-    const valueType = candidate.valueType
-      ?? (typeof candidate.valueNumber === 'number' || typeof candidate.value === 'number' ? 'number' : 'string');
+    const valueType = candidate.valueType ?? (typeof candidate.valueNumber === 'number' || typeof candidate.value === 'number' ? 'number' : 'string');
 
     return {
       id: crypto.randomUUID(),
@@ -123,7 +126,7 @@ function buildDrawingFromParseResponse(projectId: string, file: File, payload: P
       width: preview.width,
       height: preview.height,
     })),
-    ocrItems: payload.ocrItems.map((item, index) => ({
+    ocrItems: payload.ocrItems.map((item) => ({
       id: crypto.randomUUID(),
       pageNo: item.page,
       text: item.text,
@@ -170,7 +173,17 @@ function applyCandidateValue(block: EstimateBlock, candidate: AICandidate, drawi
   return nextBlock;
 }
 
-export default function Home() {
+function createBlockForType(projectId: string, blockType: BlockType, baseName: string, drawingId: string | null = null): EstimateBlock {
+  const block = createDefaultBlock(projectId, baseName, drawingId);
+  block.blockType = blockType;
+  return block;
+}
+
+interface HomeProps {
+  preferredBlockType?: BlockType;
+}
+
+export default function Home({ preferredBlockType }: HomeProps) {
   const [appState, setAppState] = useState<AppState | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -179,6 +192,8 @@ export default function Home() {
   const [hoveredCandidateId, setHoveredCandidateId] = useState<string | null>(null);
   const [activeOcrItemId, setActiveOcrItemId] = useState<string | null>(null);
   const [masters, setMasters] = useState<PriceMasterItem[]>([]);
+  const [reportBundle, setReportBundle] = useState<GeneratedReportBundle>(EMPTY_REPORT_BUNDLE);
+  const [reportError, setReportError] = useState<string | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -237,32 +252,67 @@ export default function Home() {
     return activeProject.drawings.find((drawing) => drawing.id === appState.activeDrawingId) ?? activeProject.drawings[0] ?? null;
   }, [activeProject, appState]);
 
-  const activeCandidateId = hoveredCandidateId ?? selectedCandidateId;
-  const reportBundle = useMemo(
-    () => {
-      if (!activeProject || !activeBlock) {
-        return {
-          estimateRows: [],
-          unitPriceEvidenceRows: [],
-          reviewIssues: [],
-          summary: {
-            totalAmount: 0,
-            totalRows: 0,
-            requiresReviewCount: 0,
-          },
-        };
-      }
+  useEffect(() => {
+    if (!appState || !activeProject || !preferredBlockType) return;
+    if (activeBlock?.blockType === preferredBlockType) return;
 
-      return generateReportBundle({
+    const existing = activeProject.blocks.find((block) => block.blockType === preferredBlockType);
+    if (existing) {
+      setAppState((prev) => (prev ? { ...prev, activeBlockId: existing.id } : prev));
+      return;
+    }
+
+    const nextBlock = createBlockForType(activeProject.id, preferredBlockType, `${activeProject.name} ${getWorkTypeLabel(preferredBlockType)} ${activeProject.blocks.length + 1}`, activeDrawing?.id ?? null);
+    setAppState((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        projects: updateProjectCollection(prev.projects, activeProject.id, (project) => ({
+          ...project,
+          blocks: [...project.blocks, nextBlock],
+          updatedAt: new Date().toISOString(),
+        })),
+        activeBlockId: nextBlock.id,
+      };
+    });
+  }, [appState, activeBlock?.id, activeBlock?.blockType, activeDrawing?.id, activeProject, preferredBlockType]);
+
+  const activeCandidateId = hoveredCandidateId ?? selectedCandidateId;
+  const effectiveDate = new Date().toISOString().slice(0, 10);
+  const result = useMemo(() => (activeBlock ? calculate(activeBlock, { masters, effectiveDate }) : null), [activeBlock, effectiveDate, masters]);
+
+  useEffect(() => {
+    if (!activeProject || !activeBlock) {
+      setReportBundle(EMPTY_REPORT_BUNDLE);
+      setReportError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void generateReport({
         project: activeProject,
         block: activeBlock,
         drawing: activeDrawing,
-        result: calculate(activeBlock),
-        masters,
-      });
-    },
-    [activeBlock, activeDrawing, activeProject, masters],
-  );
+        effectiveDate,
+      })
+        .then((bundle) => {
+          if (cancelled) return;
+          setReportBundle(bundle);
+          setReportError(null);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setReportBundle(EMPTY_REPORT_BUNDLE);
+          setReportError(error instanceof Error ? error.message : '帳票生成に失敗しました。');
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate]);
 
   const replaceActiveProject = useCallback((updater: (project: Project) => Project) => {
     setAppState((prev) => {
@@ -292,6 +342,9 @@ export default function Home() {
         if (field === 'secondaryProduct' && typeof value === 'string' && value) {
           updatedBlock.name = value;
         }
+        if (field === 'blockType' && typeof value === 'string') {
+          updatedBlock.name = updatedBlock.secondaryProduct || `${getWorkTypeLabel(value as BlockType)} 見積`;
+        }
         return updatedBlock;
       }),
     }));
@@ -302,6 +355,9 @@ export default function Home() {
     const name = prompt('追加する案件名を入力してください。', defaultName);
     if (!name) return;
     const project = createDefaultProject(name);
+    if (preferredBlockType) {
+      project.blocks = [createBlockForType(project.id, preferredBlockType, `${name} ${getWorkTypeLabel(preferredBlockType)} 1`)];
+    }
     setAppState((prev) => {
       const current = prev ?? createInitialAppState();
       return {
@@ -315,47 +371,45 @@ export default function Home() {
     setSelectedCandidateId(null);
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
-  }, [appState]);
+  }, [appState, preferredBlockType]);
 
   const handleSelectProject = useCallback((projectId: string) => {
     setAppState((prev) => {
       if (!prev) return prev;
       const project = prev.projects.find((item) => item.id === projectId) ?? prev.projects[0];
+      const nextBlock = preferredBlockType
+        ? project.blocks.find((block) => block.blockType === preferredBlockType) ?? project.blocks[0]
+        : project.blocks[0];
       return {
         ...prev,
         activeProjectId: project.id,
         activeDrawingId: project.drawings[0]?.id ?? null,
-        activeBlockId: project.blocks[0]?.id ?? null,
+        activeBlockId: nextBlock?.id ?? null,
       };
     });
     setUploadError(null);
     setSelectedCandidateId(null);
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
-  }, []);
+  }, [preferredBlockType]);
 
   const handleAddBlock = useCallback(() => {
     if (!activeProject) return;
-    const defaultName = `${activeProject.name} 見積 ${activeProject.blocks.length + 1}`;
+    const targetType = preferredBlockType ?? activeBlock?.blockType ?? 'secondary_product';
+    const defaultName = `${activeProject.name} ${getWorkTypeLabel(targetType)} ${activeProject.blocks.length + 1}`;
     const name = prompt('追加する見積の名前を入力してください。', defaultName);
     if (name === null) return;
-    const newBlock = createDefaultBlock(activeProject.id, name || defaultName, activeDrawing?.id ?? null);
-    replaceActiveProject((project) => ({
-      ...project,
-      blocks: [...project.blocks, newBlock],
-    }));
+    const newBlock = createBlockForType(activeProject.id, targetType, name || defaultName, activeDrawing?.id ?? null);
+    replaceActiveProject((project) => ({ ...project, blocks: [...project.blocks, newBlock] }));
     setAppState((prev) => (prev ? { ...prev, activeBlockId: newBlock.id } : prev));
-  }, [activeProject, activeDrawing, replaceActiveProject]);
+  }, [activeBlock?.blockType, activeDrawing?.id, activeProject, preferredBlockType, replaceActiveProject]);
 
   const handleDeleteBlock = useCallback(() => {
     if (!activeProject || !activeBlock || activeProject.blocks.length <= 1) return;
     if (!confirm(`「${activeBlock.name}」を削除しますか？\nこの操作は元に戻せません。`)) return;
 
     const remainingBlocks = activeProject.blocks.filter((block) => block.id !== activeBlock.id);
-    replaceActiveProject((project) => ({
-      ...project,
-      blocks: remainingBlocks,
-    }));
+    replaceActiveProject((project) => ({ ...project, blocks: remainingBlocks }));
     setAppState((prev) => (prev ? { ...prev, activeBlockId: remainingBlocks[0]?.id ?? null } : prev));
   }, [activeProject, activeBlock, replaceActiveProject]);
 
@@ -371,10 +425,7 @@ export default function Home() {
     const name = prompt('複製して保存する見積名を入力してください。', suggestedName);
     if (!name) return;
     const nextBlock = { ...activeBlock, id: crypto.randomUUID(), name };
-    replaceActiveProject((project) => ({
-      ...project,
-      blocks: [...project.blocks, nextBlock],
-    }));
+    replaceActiveProject((project) => ({ ...project, blocks: [...project.blocks, nextBlock] }));
     setAppState((prev) => (prev ? { ...prev, activeBlockId: nextBlock.id } : prev));
     toast.success(`「${name}」として複製保存しました。`);
   }, [activeProject, activeBlock, replaceActiveProject]);
@@ -392,12 +443,12 @@ export default function Home() {
   }, []);
 
   const handleUploadFile = useCallback(async (file: File) => {
-    if (!activeProject) return;
+    if (!activeProject || !activeBlock) return;
     setUploadError(null);
     setIsUploading(true);
 
     try {
-      const payload = await parseDrawing(file, 'secondary_product');
+      const payload = await parseDrawing(file, activeBlock.blockType);
       const nextDrawing = buildDrawingFromParseResponse(activeProject.id, file, payload);
 
       replaceActiveProject((project) => ({
@@ -424,7 +475,7 @@ export default function Home() {
     } finally {
       setIsUploading(false);
     }
-  }, [activeProject, replaceActiveProject]);
+  }, [activeBlock, activeProject, replaceActiveProject]);
 
   const handleApplyCandidate = useCallback((candidateId: string) => {
     if (!activeProject || !activeBlock || !activeDrawing) return;
@@ -478,49 +529,36 @@ export default function Home() {
     }
   }, []);
 
-  if (!initialized || !appState || !activeProject || !activeBlock) {
+  if (!initialized || !appState || !activeProject || !activeBlock || !result) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="text-gray-500">案件データを読み込んでいます...</div>
       </div>
     );
   }
 
   const activeIndex = Math.max(0, activeProject.blocks.findIndex((block) => block.id === activeBlock.id));
-  const result = calculate(activeBlock);
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col overflow-hidden">
+    <div className="flex min-h-screen flex-col overflow-hidden bg-gray-100">
       <Header />
 
-      <div className="flex items-center justify-end gap-3 bg-white border-b border-gray-200 px-4 py-1">
+      <div className="flex items-center justify-end gap-3 border-b border-gray-200 bg-white px-4 py-1">
         <div className="flex items-center gap-2 text-xs text-gray-600">
           <span>自動保存</span>
           <button
             onClick={handleToggleAutoSave}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              appState.autoSave ? 'bg-green-500' : 'bg-gray-300'
-            }`}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${appState.autoSave ? 'bg-green-500' : 'bg-gray-300'}`}
             title="自動保存のオン・オフを切り替えます"
           >
-            <span
-              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                appState.autoSave ? 'translate-x-5' : 'translate-x-0.5'
-              }`}
-            />
+            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${appState.autoSave ? 'translate-x-5' : 'translate-x-0.5'}`} />
           </button>
           <span className="hidden sm:inline">{appState.autoSave ? '入力後に自動で保存します' : '手動保存のみです'}</span>
         </div>
-        <button
-          onClick={handleSave}
-          className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-        >
+        <button onClick={handleSave} className="flex items-center gap-1 rounded bg-green-500 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-green-600">
           💾 案件データを保存
         </button>
-        <button
-          onClick={handleSaveAs}
-          className="flex items-center gap-1 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-        >
+        <button onClick={handleSaveAs} className="flex items-center gap-1 rounded bg-blue-500 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-600">
           💾 見積を複製保存
         </button>
       </div>
@@ -533,7 +571,7 @@ export default function Home() {
               案件ワークスペース
             </div>
             <p className="mt-1 text-xs leading-5 text-slate-500">
-              案件ごとに図面と見積をまとめて管理します。図面 OCR の根拠と試算結果を同じ画面で確認できます。
+              案件ごとに図面と見積をまとめて管理します。図面 OCR の根拠、工種判定、帳票生成を同じ画面で確認できます。
             </p>
           </div>
           <button
@@ -548,12 +586,7 @@ export default function Home() {
 
         <div className="mt-3 flex flex-wrap gap-2">
           {appState.projects.map((project) => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              isActive={project.id === activeProject.id}
-              onSelect={() => handleSelectProject(project.id)}
-            />
+            <ProjectCard key={project.id} project={project} isActive={project.id === activeProject.id} onSelect={() => handleSelectProject(project.id)} />
           ))}
         </div>
       </div>
@@ -566,51 +599,22 @@ export default function Home() {
               <div className="mt-3 grid gap-3 md:grid-cols-3">
                 <label className="space-y-1 text-xs text-slate-600">
                   <span className="font-semibold text-slate-800">案件名</span>
-                  <input
-                    type="text"
-                    value={activeProject.name}
-                    onChange={(event) => handleProjectMetaChange('name', event.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
-                  />
+                  <input type="text" value={activeProject.name} onChange={(event) => handleProjectMetaChange('name', event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900" />
                 </label>
                 <label className="space-y-1 text-xs text-slate-600">
                   <span className="font-semibold text-slate-800">元請名</span>
-                  <input
-                    type="text"
-                    value={activeProject.clientName}
-                    onChange={(event) => handleProjectMetaChange('clientName', event.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
-                    placeholder="任意入力"
-                  />
+                  <input type="text" value={activeProject.clientName} onChange={(event) => handleProjectMetaChange('clientName', event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900" placeholder="任意入力" />
                 </label>
                 <label className="space-y-1 text-xs text-slate-600">
                   <span className="font-semibold text-slate-800">現場名</span>
-                  <input
-                    type="text"
-                    value={activeProject.siteName}
-                    onChange={(event) => handleProjectMetaChange('siteName', event.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
-                    placeholder="任意入力"
-                  />
+                  <input type="text" value={activeProject.siteName} onChange={(event) => handleProjectMetaChange('siteName', event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900" placeholder="任意入力" />
                 </label>
               </div>
             </div>
             <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-1">
-              <GuideStep
-                step="STEP 1"
-                title="案件を選ぶ"
-                description="案件ごとに図面と見積を分けて保存します。"
-              />
-              <GuideStep
-                step="STEP 2"
-                title="図面を OCR 解析"
-                description="PDF または画像をアップロードすると OCR と候補が生成されます。"
-              />
-              <GuideStep
-                step="STEP 3"
-                title="候補を確認して反映"
-                description="根拠 bbox を見ながら入力フォームへ候補を反映します。"
-              />
+              <GuideStep step="STEP 1" title="工種別見積を選ぶ" description="二次製品・擁壁・舗装・撤去のどれを見積るか選びます。" />
+              <GuideStep step="STEP 2" title="図面を OCR 解析" description="PDF または画像をアップロードすると OCR と候補が生成されます。" />
+              <GuideStep step="STEP 3" title="候補を確認して帳票化" description="根拠 bbox を見ながら候補を反映し、見積書・単価根拠表・要確認一覧を生成します。" />
             </div>
           </div>
         </div>
@@ -653,7 +657,8 @@ export default function Home() {
                 反映状況
               </div>
               <div className="mt-2 text-sm text-slate-600">
-                <div>紐づく図面: <span className="font-semibold text-slate-900">{activeDrawing?.drawingTitle || '未選択'}</span></div>
+                <div>工種: <span className="font-semibold text-slate-900">{getWorkTypeLabel(activeBlock.blockType)}</span></div>
+                <div className="mt-1">紐づく図面: <span className="font-semibold text-slate-900">{activeDrawing?.drawingTitle || '未選択'}</span></div>
                 <div className="mt-1">反映済み候補: <span className="font-semibold text-slate-900">{activeBlock.appliedCandidateIds.length} 件</span></div>
               </div>
               {activeBlock.requiresReviewFields.length > 0 ? (
@@ -668,22 +673,17 @@ export default function Home() {
             </div>
 
             <CalculationResults result={result} block={activeBlock} />
-            <DocumentPanel
-              bundle={reportBundle}
-              drawing={activeDrawing}
-              projectName={activeProject.name}
-              estimateName={activeBlock.name}
-            />
+            {reportError && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
+                {reportError}
+              </div>
+            )}
+            <DocumentPanel bundle={reportBundle} drawing={activeDrawing} projectName={activeProject.name} estimateName={activeBlock.name} />
           </div>
         </div>
       </div>
 
-      <SaveBar
-        autoSave={appState.autoSave}
-        onToggleAutoSave={handleToggleAutoSave}
-        onSave={handleSave}
-        onSaveAs={handleSaveAs}
-      />
+      <SaveBar autoSave={appState.autoSave} onToggleAutoSave={handleToggleAutoSave} onSave={handleSave} onSaveAs={handleSaveAs} />
     </div>
   );
 }

@@ -1,4 +1,9 @@
-import type { ParseDrawingResponse, PriceMasterItem } from './types';
+import type {
+  GeneratedReportBundle,
+  ParseDrawingResponse,
+  PriceMasterItem,
+  ReportGenerationRequest,
+} from './types';
 
 const FALLBACK_API_BASE_URL = 'http://127.0.0.1:8000';
 
@@ -80,4 +85,24 @@ export async function saveMasters(items: PriceMasterItem[]): Promise<PriceMaster
 
   const payload = await response.json() as { data?: PriceMasterItem[] };
   return Array.isArray(payload.data) ? payload.data : items;
+}
+
+export async function generateReport(request: ReportGenerationRequest): Promise<GeneratedReportBundle> {
+  const response = await fetch('/api/reports/generate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, '帳票生成に失敗しました。'));
+  }
+
+  const payload = await response.json() as { data?: GeneratedReportBundle };
+  if (!payload.data) {
+    throw new Error('帳票データが返却されませんでした。');
+  }
+  return payload.data;
 }

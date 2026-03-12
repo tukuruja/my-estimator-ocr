@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import type { PriceMasterItem } from '../client/src/lib/types';
-import { getMasterItemById, listMasterItems, upsertMasterItem, writeMasterState } from './masterStore';
+import { getMasterItemById, listMasterItems, replaceMasterItems, upsertMasterItem } from './masterStore';
 
 type Next = (err?: unknown) => void;
 
@@ -52,16 +52,16 @@ async function handleMasterApi(req: IncomingMessage, res: ServerResponse): Promi
         sendJson(res, 422, { success: false, error: { message: '単価マスタの形式が不正です。' } });
         return true;
       }
-      const state = await upsertMasterItem(body);
-      sendJson(res, 200, { success: true, data: state.items.find((item) => item.id === body.id) ?? body });
+      const item = await upsertMasterItem(body);
+      sendJson(res, 200, { success: true, data: item });
       return true;
     }
 
     if (method === 'PUT') {
       const body = await readJsonBody<{ items?: PriceMasterItem[] }>(req);
       const items = Array.isArray(body.items) ? body.items : [];
-      const state = await writeMasterState({ items });
-      sendJson(res, 200, { success: true, data: state.items });
+      const saved = await replaceMasterItems(items);
+      sendJson(res, 200, { success: true, data: saved });
       return true;
     }
   }
@@ -86,8 +86,8 @@ async function handleMasterApi(req: IncomingMessage, res: ServerResponse): Promi
         sendJson(res, 422, { success: false, error: { message: '単価マスタIDが一致しません。' } });
         return true;
       }
-      const state = await upsertMasterItem(body);
-      sendJson(res, 200, { success: true, data: state.items.find((item) => item.id === masterId) ?? body });
+      const item = await upsertMasterItem(body);
+      sendJson(res, 200, { success: true, data: item });
       return true;
     }
   }

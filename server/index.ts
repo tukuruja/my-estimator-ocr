@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createAppStateApiMiddleware } from "./appStateApi";
 import { createMasterApiMiddleware } from "./masterApi";
+import { createReportApiMiddleware } from "./reportApi";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +13,7 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
   app.use(createMasterApiMiddleware());
+  app.use(createReportApiMiddleware());
   app.use(createAppStateApiMiddleware());
 
   // Serve static files from dist/public in production

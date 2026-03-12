@@ -44,16 +44,21 @@ app.mount("/files", StaticFiles(directory=str(STORAGE_DIR)), name="files")
 ocr_engine = RapidOCR()
 
 FIELD_LABELS = {
-    "secondaryProduct": "製品名",
+    "secondaryProduct": "対象名",
     "distance": "施工延長",
     "currentHeight": "現況高",
     "plannedHeight": "計画高",
     "stages": "据付段数",
-    "productWidth": "製品幅",
-    "productHeight": "製品高さ",
+    "productWidth": "製品幅 / 底版幅",
+    "productHeight": "製品高さ / 擁壁高",
     "productLength": "製品長さ",
-    "baseThickness": "ベース厚",
-    "crushedStoneThickness": "砕石厚",
+    "baseThickness": "ベース厚 / 路盤厚",
+    "crushedStoneThickness": "砕石厚 / 下層路盤厚",
+    "pavementWidth": "舗装幅",
+    "surfaceThickness": "表層厚",
+    "binderThickness": "基層厚",
+    "demolitionWidth": "撤去幅",
+    "demolitionThickness": "撤去厚",
 }
 
 SECONDARY_PRODUCT_HINT_PATTERN = re.compile(
@@ -259,7 +264,7 @@ def choose_candidate(existing: dict[str, Any] | None, candidate: dict[str, Any])
     return existing
 
 
-def extract_candidates(ocr_items: list[dict[str, Any]]) -> dict[str, Any]:
+def extract_candidates(ocr_items: list[dict[str, Any]], mode: str) -> dict[str, Any]:
     candidates: dict[str, Any] = {}
 
     for item in ocr_items:
@@ -268,181 +273,143 @@ def extract_candidates(ocr_items: list[dict[str, Any]]) -> dict[str, Any]:
         source_box = item["box"]
         source_page = item["page"]
 
+        def add_candidate(field_name: str, value: str | float | int, reason: str, confidence: float, requires_review: bool) -> None:
+            candidates[field_name] = choose_candidate(
+                candidates.get(field_name),
+                build_candidate(
+                    field_name,
+                    source_text,
+                    source_page,
+                    source_box,
+                    value,
+                    reason,
+                    confidence,
+                    should_require_review(item["score"], source_box, requires_review),
+                ),
+            )
+
         distance_match = (
             re.search(r"(?:施工延長|延長)\s*[=:：-]?\s*(-?\d+(?:\.\d+)?)\s*(?:m)?", normalized, flags=re.IGNORECASE)
             or re.search(r"(?:^|[^A-Za-z])L\s*[=:]?\s*(-?\d+(?:\.\d+)?)\s*m\b", normalized, flags=re.IGNORECASE)
         )
-        distance = float(distance_match.group(1)) if distance_match else None
-        if distance is not None:
-            candidates["distance"] = choose_candidate(
-                candidates.get("distance"),
-                build_candidate(
-                    "distance",
-                    source_text,
-                    source_page,
-                    source_box,
-                    normalize_meters(distance),
-                    "施工延長の表記を抽出",
-                    min(0.97, item["score"]),
-                    should_require_review(item["score"], source_box),
-                ),
-            )
-
-        stages = extract_numeric_value(normalized, r"(\d+)\s*段")
-        if stages is None:
-            stages = extract_numeric_value(normalized, r"^\s*(\d+)\s*[xX×]\s*$")
-        if stages is None:
-            stages = extract_numeric_value(normalized, r"(\d+)\s*連")
-        if stages is not None:
-            stage_requires_review = "段" not in normalized
-            candidates["stages"] = choose_candidate(
-                candidates.get("stages"),
-                build_candidate(
-                    "stages",
-                    source_text,
-                    source_page,
-                    source_box,
-                    int(stages),
-                    "段数表記を抽出",
-                    min(0.92, item["score"]),
-                    should_require_review(item["score"], source_box, stage_requires_review),
-                ),
-            )
+        if distance_match:
+            add_candidate("distance", normalize_meters(float(distance_match.group(1))), "施工延長の表記を抽出", min(0.97, item["score"]), False)
 
         current_height = extract_numeric_value(normalized, r"(?:現況|現況高|GL|既設高)\s*[=:：-]?\s*(-?\d+(?:\.\d+)?)")
         if current_height is not None:
-            candidates["currentHeight"] = choose_candidate(
-                candidates.get("currentHeight"),
-                build_candidate(
-                    "currentHeight",
-                    source_text,
-                    source_page,
-                    source_box,
-                    normalize_meters(current_height),
-                    "現況高候補を抽出",
-                    min(0.88, item["score"]),
-                    should_require_review(item["score"], source_box),
-                ),
-            )
+            add_candidate("currentHeight", normalize_meters(current_height), "現況高候補を抽出", min(0.88, item["score"]), False)
 
         planned_height = extract_numeric_value(normalized, r"(?:計画|計画高|FH|計画GL)\s*[=:：-]?\s*(-?\d+(?:\.\d+)?)")
         if planned_height is not None:
-            candidates["plannedHeight"] = choose_candidate(
-                candidates.get("plannedHeight"),
-                build_candidate(
-                    "plannedHeight",
-                    source_text,
-                    source_page,
-                    source_box,
-                    normalize_meters(planned_height),
-                    "計画高候補を抽出",
-                    min(0.88, item["score"]),
-                    should_require_review(item["score"], source_box),
-                ),
-            )
+            add_candidate("plannedHeight", normalize_meters(planned_height), "計画高候補を抽出", min(0.88, item["score"]), False)
 
         base_thickness = (
             extract_numeric_value(normalized, r"(?:ベース厚|基礎厚|ベースコン(?:クリート)?厚?)\s*[=:：tT-]?\s*(\d+(?:\.\d+)?)")
             or extract_numeric_value(normalized, r"(?:ベース|基礎)\s*[=:：-]?\s*t\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
         )
         if base_thickness is not None:
-            candidates["baseThickness"] = choose_candidate(
-                candidates.get("baseThickness"),
-                build_candidate(
-                    "baseThickness",
-                    source_text,
-                    source_page,
-                    source_box,
-                    normalize_maybe_millimeters(base_thickness),
-                    "ベース厚表記を抽出",
-                    min(0.86, item["score"]),
-                    should_require_review(item["score"], source_box),
-                ),
-            )
+            add_candidate("baseThickness", normalize_maybe_millimeters(base_thickness), "ベース厚表記を抽出", min(0.86, item["score"]), False)
 
         crushed_stone_thickness = (
-            extract_numeric_value(normalized, r"(?:砕石厚|砕石厚さ|基礎砕石(?:厚)?)\s*[=:：tT-]?\s*(\d+(?:\.\d+)?)")
+            extract_numeric_value(normalized, r"(?:砕石厚|砕石厚さ|基礎砕石(?:厚)?|下層路盤(?:厚)?)\s*[=:：tT-]?\s*(\d+(?:\.\d+)?)")
             or extract_numeric_value(normalized, r"(?:砕石|RC-40|C-40)\s*[=:：-]?\s*t\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
         )
         if crushed_stone_thickness is not None:
-            candidates["crushedStoneThickness"] = choose_candidate(
-                candidates.get("crushedStoneThickness"),
-                build_candidate(
-                    "crushedStoneThickness",
-                    source_text,
-                    source_page,
-                    source_box,
-                    normalize_maybe_millimeters(crushed_stone_thickness),
-                    "砕石厚表記を抽出",
-                    min(0.86, item["score"]),
-                    should_require_review(item["score"], source_box),
-                ),
-            )
+            add_candidate("crushedStoneThickness", normalize_maybe_millimeters(crushed_stone_thickness), "砕石厚表記を抽出", min(0.86, item["score"]), False)
 
-        dimension_match = re.search(r"(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)", normalized)
-        labeled_dimension_match = re.search(
-            r"(?:B|W)\s*[=:]?\s*(\d+(?:\.\d+)?)\D+(?:H)\s*[=:]?\s*(\d+(?:\.\d+)?)\D+(?:L)\s*[=:]?\s*(\d+(?:\.\d+)?)",
-            normalized,
-        )
-        dimension_source = labeled_dimension_match or dimension_match
-        if dimension_source:
-            width, height, length = [normalize_maybe_millimeters(float(value)) for value in dimension_source.groups()]
-            dimension_requires_review = should_require_review(item["score"], source_box, labeled_dimension_match is None)
-            candidates["productWidth"] = choose_candidate(
-                candidates.get("productWidth"),
-                build_candidate("productWidth", source_text, source_page, source_box, width, "寸法表記から製品幅を推定", min(0.82, item["score"]), dimension_requires_review),
-            )
-            candidates["productHeight"] = choose_candidate(
-                candidates.get("productHeight"),
-                build_candidate("productHeight", source_text, source_page, source_box, height, "寸法表記から製品高さを推定", min(0.82, item["score"]), dimension_requires_review),
-            )
-            candidates["productLength"] = choose_candidate(
-                candidates.get("productLength"),
-                build_candidate("productLength", source_text, source_page, source_box, f"{length:g}", "寸法表記から製品長さを推定", min(0.82, item["score"]), dimension_requires_review),
-            )
+        if mode == "secondary_product":
+            stages = extract_numeric_value(normalized, r"(\d+)\s*段")
+            if stages is None:
+                stages = extract_numeric_value(normalized, r"^\s*(\d+)\s*[xX×]\s*$")
+            if stages is None:
+                stages = extract_numeric_value(normalized, r"(\d+)\s*連")
+            if stages is not None:
+                stage_requires_review = "段" not in normalized
+                add_candidate("stages", int(stages), "段数表記を抽出", min(0.92, item["score"]), stage_requires_review)
 
-        if "productLength" not in candidates:
-            standalone_length = extract_numeric_value(normalized, r"(?:製品長(?:さ)?|L)\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
-            if standalone_length is not None and "m" not in normalized.lower():
-                normalized_length = normalize_maybe_millimeters(standalone_length)
-                candidates["productLength"] = choose_candidate(
-                    candidates.get("productLength"),
-                    build_candidate(
-                        "productLength",
-                        source_text,
-                        source_page,
-                        source_box,
-                        f"{normalized_length:g}",
-                        "製品長さ表記を抽出",
-                        min(0.8, item["score"]),
-                        should_require_review(item["score"], source_box, True),
-                    ),
-                )
+            dimension_match = re.search(r"(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)", normalized)
+            labeled_dimension_match = re.search(
+                r"(?:B|W)\s*[=:]?\s*(\d+(?:\.\d+)?)\D+(?:H)\s*[=:]?\s*(\d+(?:\.\d+)?)\D+(?:L)\s*[=:]?\s*(\d+(?:\.\d+)?)",
+                normalized,
+            )
+            dimension_source = labeled_dimension_match or dimension_match
+            if dimension_source:
+                width, height, length = [normalize_maybe_millimeters(float(value)) for value in dimension_source.groups()]
+                dimension_requires_review = labeled_dimension_match is None
+                add_candidate("productWidth", width, "寸法表記から製品幅を推定", min(0.82, item["score"]), dimension_requires_review)
+                add_candidate("productHeight", height, "寸法表記から製品高さを推定", min(0.82, item["score"]), dimension_requires_review)
+                add_candidate("productLength", f"{length:g}", "寸法表記から製品長さを推定", min(0.82, item["score"]), dimension_requires_review)
 
-        product_name, master_score, ambiguous_master = match_secondary_product(source_text)
-        has_name_signal = bool(re.search(r"[A-Za-z一-龯ぁ-んァ-ヶ]", normalize_text(source_text)))
-        can_use_master_match = bool(product_name and master_score >= 0.86 and has_name_signal and not is_dimension_like_text(source_text))
-        if SECONDARY_PRODUCT_HINT_PATTERN.search(source_text) or can_use_master_match:
-            product_value = product_name or source_text.strip()
-            product_confidence = min(item["score"], max(master_score, 0.62)) if product_name else min(0.72, item["score"])
-            product_reason = (
-                f"製品マスタ照合で {product_name} を候補化"
-                if product_name
-                else "製品名らしい文字列を抽出"
+            if "productLength" not in candidates:
+                standalone_length = extract_numeric_value(normalized, r"(?:製品長(?:さ)?|L)\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
+                if standalone_length is not None and "m" not in normalized.lower():
+                    normalized_length = normalize_maybe_millimeters(standalone_length)
+                    add_candidate("productLength", f"{normalized_length:g}", "製品長さ表記を抽出", min(0.8, item["score"]), True)
+
+            product_name, master_score, ambiguous_master = match_secondary_product(source_text)
+            has_name_signal = bool(re.search(r"[A-Za-z一-龯ぁ-んァ-ヶ]", normalize_text(source_text)))
+            can_use_master_match = bool(product_name and master_score >= 0.86 and has_name_signal and not is_dimension_like_text(source_text))
+            if SECONDARY_PRODUCT_HINT_PATTERN.search(source_text) or can_use_master_match:
+                product_value = product_name or source_text.strip()
+                product_confidence = min(item["score"], max(master_score, 0.62)) if product_name else min(0.72, item["score"])
+                product_reason = f"製品マスタ照合で {product_name} を候補化" if product_name else "製品名らしい文字列を抽出"
+                add_candidate("secondaryProduct", product_value, product_reason, product_confidence, ambiguous_master or not product_name)
+
+        elif mode == "retaining_wall":
+            wall_height = (
+                extract_numeric_value(normalized, r"(?:擁壁高|壁高|H)\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
+                or extract_numeric_value(normalized, r"(?:GL差|高低差)\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
             )
-            candidates["secondaryProduct"] = choose_candidate(
-                candidates.get("secondaryProduct"),
-                build_candidate(
-                    "secondaryProduct",
-                    source_text,
-                    source_page,
-                    source_box,
-                    product_value,
-                    product_reason,
-                    product_confidence,
-                    should_require_review(item["score"], source_box, ambiguous_master or not product_name),
-                ),
+            if wall_height is not None:
+                add_candidate("productHeight", normalize_maybe_millimeters(wall_height), "擁壁高表記を抽出", min(0.9, item["score"]), False)
+
+            wall_width = (
+                extract_numeric_value(normalized, r"(?:底版幅|基礎幅|B)\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
+                or extract_numeric_value(normalized, r"(?:底版|基礎)\s*[=:：-]?\s*W\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
             )
+            if wall_width is not None:
+                add_candidate("productWidth", normalize_maybe_millimeters(wall_width), "底版幅を抽出", min(0.88, item["score"]), False)
+
+            if re.search(r"擁壁|L型|逆T|重力式", normalized, flags=re.IGNORECASE) and not is_dimension_like_text(source_text):
+                add_candidate("secondaryProduct", source_text.strip(), "擁壁種別らしい文字列を抽出", min(0.85, item["score"]), False)
+
+        elif mode == "pavement":
+            pavement_width = (
+                extract_numeric_value(normalized, r"(?:舗装幅|車道幅|歩道幅|W)\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
+                or extract_numeric_value(normalized, r"(?:幅員)\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
+            )
+            if pavement_width is not None:
+                add_candidate("pavementWidth", normalize_meters(pavement_width), "舗装幅表記を抽出", min(0.9, item["score"]), False)
+
+            surface = extract_numeric_value(normalized, r"(?:表層|密粒度|再生密粒度)\s*(?:As)?\s*(?:t\s*[=:：-]?)?\s*(\d+(?:\.\d+)?)")
+            if surface is not None:
+                add_candidate("surfaceThickness", normalize_maybe_millimeters(surface), "表層厚表記を抽出", min(0.88, item["score"]), False)
+
+            binder = extract_numeric_value(normalized, r"(?:基層)\s*(?:t\s*[=:：-]?)?\s*(\d+(?:\.\d+)?)")
+            if binder is not None:
+                add_candidate("binderThickness", normalize_maybe_millimeters(binder), "基層厚表記を抽出", min(0.88, item["score"]), False)
+
+            road_base = extract_numeric_value(normalized, r"(?:上層路盤|路盤)\s*(?:t\s*[=:：-]?)?\s*(\d+(?:\.\d+)?)")
+            if road_base is not None:
+                add_candidate("baseThickness", normalize_maybe_millimeters(road_base), "路盤厚表記を抽出", min(0.86, item["score"]), False)
+
+            if re.search(r"舗装|路盤|アスファルト|表層|基層", normalized, flags=re.IGNORECASE) and not is_dimension_like_text(source_text):
+                add_candidate("secondaryProduct", source_text.strip(), "舗装種別らしい文字列を抽出", min(0.78, item["score"]), True)
+
+        elif mode == "demolition":
+            demo_width = extract_numeric_value(normalized, r"(?:撤去幅|取壊幅|解体幅|W)\s*[=:：-]?\s*(\d+(?:\.\d+)?)")
+            if demo_width is not None:
+                add_candidate("demolitionWidth", normalize_meters(demo_width), "撤去幅表記を抽出", min(0.9, item["score"]), False)
+
+            demo_thickness = (
+                extract_numeric_value(normalized, r"(?:撤去厚|取壊厚|解体厚)\s*[=:：tT-]?\s*(\d+(?:\.\d+)?)")
+                or extract_numeric_value(normalized, r"(?:撤去|取壊|解体)\s*(?:t\s*[=:：-]?)\s*(\d+(?:\.\d+)?)")
+            )
+            if demo_thickness is not None:
+                add_candidate("demolitionThickness", normalize_maybe_millimeters(demo_thickness), "撤去厚表記を抽出", min(0.9, item["score"]), False)
+
+            if re.search(r"撤去|取壊|はつり|解体", normalized, flags=re.IGNORECASE) and not is_dimension_like_text(source_text):
+                add_candidate("secondaryProduct", source_text.strip(), "撤去対象らしい文字列を抽出", min(0.82, item["score"]), False)
 
     return candidates
 
@@ -562,7 +529,7 @@ async def parse_drawing(
         })
         all_ocr_items.extend(run_ocr_on_page(page_image, index))
 
-    ai_candidates = extract_candidates(all_ocr_items) if mode == "secondary_product" else {}
+    ai_candidates = extract_candidates(all_ocr_items, mode)
     work_type_candidates = classify_work_types(all_ocr_items)
 
     return {
