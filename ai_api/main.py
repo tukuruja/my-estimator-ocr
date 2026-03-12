@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import uuid
 from difflib import SequenceMatcher
@@ -16,7 +17,9 @@ from PIL import Image, ImageOps
 
 try:
     from rapidocr import RapidOCR
-except ImportError:  # pragma: no cover - compatibility fallback
+except ModuleNotFoundError as exc:  # pragma: no cover - compatibility fallback
+    if exc.name != "rapidocr":
+        raise
     from rapidocr_onnxruntime import RapidOCR  # type: ignore
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -26,15 +29,30 @@ PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 PRODUCT_MASTER_SOURCE = BASE_DIR.parent / "client" / "src" / "lib" / "priceData.ts"
 OCR_REVIEW_SCORE_THRESHOLD = 0.75
 
-app = FastAPI(title="my-estimator OCR API", version="0.1.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+
+def parse_cors_origins() -> tuple[list[str], str | None]:
+    default_origins = [
         "http://127.0.0.1:3000",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
         "http://localhost:5173",
-    ],
+    ]
+    env_origins = [
+        origin.strip()
+        for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    allow_origin_regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX") or None
+    return list(dict.fromkeys(default_origins + env_origins)), allow_origin_regex
+
+
+cors_origins, cors_origin_regex = parse_cors_origins()
+
+app = FastAPI(title="my-estimator OCR API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -488,6 +506,11 @@ def build_image_url(request: Request, relative_path: str) -> str:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    return {"success": True, "status": "ok"}
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, Any]:
     return {"success": True, "status": "ok"}
 
 
