@@ -4,6 +4,12 @@ import type {
   PriceMasterItem,
   ReportGenerationRequest,
 } from './types';
+import type {
+  ConstructionConsensusBlueprint,
+  ConstructionConsensusPreviewResponse,
+  ConstructionSiteConditions,
+} from '@shared/constructionConsensus';
+import type { Drawing, EstimateBlock, Project } from './types';
 
 const FALLBACK_API_BASE_URL = 'http://127.0.0.1:8000';
 const LOCAL_APP_URL = 'http://localhost:3000';
@@ -194,6 +200,58 @@ export async function generateReport(request: ReportGenerationRequest): Promise<
     const payload = await response.json() as { data?: GeneratedReportBundle };
     if (!payload.data) {
       throw new Error('帳票データが返却されませんでした。');
+    }
+    return payload.data;
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {
+        throw new Error(getServerApiUnavailableMessage());
+      }
+      throw error;
+    }
+    throw new Error(getServerApiUnavailableMessage());
+  }
+}
+
+export async function fetchConsensusBlueprint(): Promise<ConstructionConsensusBlueprint> {
+  try {
+    const response = await fetch(resolveAppApiUrl('/api/ai/consensus/blueprint'));
+    await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), 'AI設計情報の取得に失敗しました。');
+    const payload = await response.json() as { data?: ConstructionConsensusBlueprint };
+    if (!payload.data) {
+      throw new Error('AI設計情報が返却されませんでした。');
+    }
+    return payload.data;
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {
+        throw new Error(getServerApiUnavailableMessage());
+      }
+      throw error;
+    }
+    throw new Error(getServerApiUnavailableMessage());
+  }
+}
+
+export async function previewConsensusRequest(input: {
+  project: Project;
+  block: EstimateBlock;
+  drawing: Drawing | null;
+  effectiveDate?: string;
+  siteConditions?: Partial<ConstructionSiteConditions>;
+}): Promise<ConstructionConsensusPreviewResponse> {
+  try {
+    const response = await fetch(resolveAppApiUrl('/api/ai/consensus/preview-request'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    });
+    await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), 'AI設計の検証リクエスト生成に失敗しました。');
+    const payload = await response.json() as { data?: ConstructionConsensusPreviewResponse };
+    if (!payload.data) {
+      throw new Error('AI設計の検証結果が返却されませんでした。');
     }
     return payload.data;
   } catch (error) {

@@ -113,6 +113,12 @@ export default function Header() {
           hoverColor="hover:bg-purple-600"
           items={priceTableItems}
         />
+        <NavButton
+          label="🧠 AI設計"
+          color="bg-amber-500"
+          hoverColor="hover:bg-amber-600"
+          href="/ai-consensus"
+        />
       </nav>
     </header>
   );

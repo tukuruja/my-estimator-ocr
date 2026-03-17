@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { ThemeProvider } from './contexts/ThemeContext';
 import Home from './pages/Home';
 import EstimateReportPage from './pages/EstimateReportPage';
+import ConsensusBlueprintPage from './pages/ConsensusBlueprintPage';
 import {
   ConcretePriceTable,
   RoadPriceTable,
@@ -43,6 +44,9 @@ function Router() {
       </Route>
       <Route path={'/print'}>
         <EstimateReportPage />
+      </Route>
+      <Route path={'/ai-consensus'}>
+        <ConsensusBlueprintPage />
       </Route>
       <Route path={'/price-tables/concrete'} component={ConcretePriceTable} />
       <Route path={'/price-tables/road'} component={RoadPriceTable} />

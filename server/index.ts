@@ -3,6 +3,7 @@ import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createAppStateApiMiddleware } from "./appStateApi";
+import { createConsensusApiMiddleware } from "./consensusApi";
 import { createMasterApiMiddleware } from "./masterApi";
 import { createReportApiMiddleware } from "./reportApi";
 
@@ -55,6 +56,7 @@ async function startServer() {
     res.status(200).json({ success: true, status: "ok" });
   });
 
+  app.use(createConsensusApiMiddleware());
   app.use(createMasterApiMiddleware());
   app.use(createReportApiMiddleware());
   app.use(createAppStateApiMiddleware());
