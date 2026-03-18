@@ -13,6 +13,20 @@ import type { Drawing, EstimateBlock, Project } from './types';
 
 const FALLBACK_API_BASE_URL = 'http://127.0.0.1:8000';
 const LOCAL_APP_URL = 'http://localhost:3000';
+const OCR_JOB_POLL_INTERVAL_MS = 1500;
+const OCR_JOB_TIMEOUT_MS = 5 * 60 * 1000;
+
+export interface OcrParseJobState {
+  jobId: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  progressMessage: string;
+  createdAt: string;
+  updatedAt: string;
+  result?: ParseDrawingResponse;
+  error?: {
+    message: string;
+  };
+}
 
 function isBrowser(): boolean {
   return typeof window !== 'undefined';
@@ -26,6 +40,10 @@ function isLocalAppOrigin(): boolean {
 function isLikelyHostedPreview(): boolean {
   if (!isBrowser()) return false;
   return !isLocalAppOrigin();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export function getAiApiUnavailableMessage(): string {
@@ -114,18 +132,53 @@ async function ensureJsonApiResponse(
   return response;
 }
 
-export async function parseDrawing(file: File, mode: string = 'secondary_product'): Promise<ParseDrawingResponse> {
+async function createParseDrawingJob(file: File, mode: string): Promise<OcrParseJobState> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('mode', mode);
 
+  const response = await fetch(resolveAiApiUrl('/api/ocr/jobs'), {
+    method: 'POST',
+    body: formData,
+  });
+  await ensureJsonApiResponse(response, getAiApiUnavailableMessage(), 'OCRジョブの作成に失敗しました。');
+  return response.json() as Promise<OcrParseJobState>;
+}
+
+async function fetchParseDrawingJob(jobId: string): Promise<OcrParseJobState> {
+  const response = await fetch(resolveAiApiUrl(`/api/ocr/jobs/${jobId}`));
+  await ensureJsonApiResponse(response, getAiApiUnavailableMessage(), 'OCRジョブの状態取得に失敗しました。');
+  return response.json() as Promise<OcrParseJobState>;
+}
+
+export async function parseDrawing(
+  file: File,
+  mode: string = 'secondary_product',
+  options?: {
+    onProgress?: (job: OcrParseJobState) => void;
+    timeoutMs?: number;
+  },
+): Promise<ParseDrawingResponse> {
   try {
-    const response = await fetch(resolveAiApiUrl('/api/ocr/parse-drawing'), {
-      method: 'POST',
-      body: formData,
-    });
-    await ensureJsonApiResponse(response, getAiApiUnavailableMessage(), 'OCR解析に失敗しました。');
-    return response.json() as Promise<ParseDrawingResponse>;
+    const initialJob = await createParseDrawingJob(file, mode);
+    options?.onProgress?.(initialJob);
+
+    const deadline = Date.now() + (options?.timeoutMs ?? OCR_JOB_TIMEOUT_MS);
+    let currentJob = initialJob;
+
+    while (Date.now() <= deadline) {
+      if (currentJob.status === 'completed' && currentJob.result) {
+        return currentJob.result;
+      }
+      if (currentJob.status === 'failed') {
+        throw new Error(currentJob.error?.message || 'OCR解析ジョブが失敗しました。');
+      }
+      await sleep(OCR_JOB_POLL_INTERVAL_MS);
+      currentJob = await fetchParseDrawingJob(initialJob.jobId);
+      options?.onProgress?.(currentJob);
+    }
+
+    throw new Error('OCR解析がタイムアウトしました。しばらく待ってから再実行してください。');
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {

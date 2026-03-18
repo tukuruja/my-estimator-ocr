@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { FileSearch, LoaderCircle, Upload } from 'lucide-react';
 import type { AICandidate, BoundingBox, Drawing, OcrItem } from '@/lib/types';
 import OcrCanvas from './OcrCanvas';
@@ -13,6 +13,7 @@ interface OcrReviewPanelProps {
   isUploading: boolean;
   uploadError: string | null;
   uploadDisabledReason?: string | null;
+  uploadStatusMessage?: string | null;
   onUploadFile: (file: File) => void;
   onSelectDrawing: (drawingId: string) => void;
   onSelectOcrItem: (itemId: string | null) => void;
@@ -20,6 +21,11 @@ interface OcrReviewPanelProps {
   onHoverCandidate: (candidateId: string | null) => void;
   onApplyCandidate: (candidateId: string) => void;
   onApplyAllCandidates: () => void;
+}
+
+export interface OcrReviewPanelHandle {
+  focusAndOpenUpload: () => void;
+  focusPanel: () => void;
 }
 
 function derivePageItems(items: OcrItem[], pageNo: number) {
@@ -30,7 +36,7 @@ function derivePageCandidates(candidates: AICandidate[], pageNo: number) {
   return candidates.filter((candidate) => candidate.sourcePage === pageNo);
 }
 
-export default function OcrReviewPanel({
+const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(function OcrReviewPanel({
   drawings,
   activeDrawingId,
   activeOcrItemId,
@@ -38,6 +44,7 @@ export default function OcrReviewPanel({
   isUploading,
   uploadError,
   uploadDisabledReason,
+  uploadStatusMessage,
   onUploadFile,
   onSelectDrawing,
   onSelectOcrItem,
@@ -45,10 +52,25 @@ export default function OcrReviewPanel({
   onHoverCandidate,
   onApplyCandidate,
   onApplyAllCandidates,
-}: OcrReviewPanelProps) {
+}: OcrReviewPanelProps, ref) {
   const [selectedPageNo, setSelectedPageNo] = useState(1);
   const [zoom, setZoom] = useState(0.45);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    focusPanel() {
+      panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    focusAndOpenUpload() {
+      panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      window.setTimeout(() => {
+        if (!uploadDisabledReason && !isUploading) {
+          fileInputRef.current?.click();
+        }
+      }, 180);
+    },
+  }), [isUploading, uploadDisabledReason]);
 
   const activeDrawing = useMemo(
     () => drawings.find((drawing) => drawing.id === activeDrawingId) ?? drawings[0] ?? null,
@@ -85,7 +107,7 @@ export default function OcrReviewPanel({
   const focusBox: BoundingBox | null = activeCandidate?.sourceBox ?? activeItem?.box ?? null;
 
   return (
-    <div className="flex h-full min-h-[720px] flex-col rounded-lg border border-slate-200 bg-white shadow-md">
+    <div ref={panelRef} className="flex h-full min-h-[720px] flex-col rounded-lg border border-slate-200 bg-white shadow-md">
       <div className="border-b border-slate-200 px-4 py-3">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div>
@@ -106,7 +128,7 @@ export default function OcrReviewPanel({
               title={uploadDisabledReason ?? undefined}
             >
               {isUploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-              {isUploading ? 'OCR解析中...' : '図面をアップロード'}
+              {isUploading ? (uploadStatusMessage || 'OCR解析中...') : '図面をアップロード'}
             </button>
             <input
               ref={fileInputRef}
@@ -133,6 +155,12 @@ export default function OcrReviewPanel({
         {!uploadError && uploadDisabledReason && (
           <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             {uploadDisabledReason}
+          </div>
+        )}
+
+        {!uploadError && isUploading && uploadStatusMessage && (
+          <div className="mt-3 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
+            {uploadStatusMessage}
           </div>
         )}
 
@@ -240,4 +268,6 @@ export default function OcrReviewPanel({
       </div>
     </div>
   );
-}
+});
+
+export default OcrReviewPanel;

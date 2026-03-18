@@ -40,20 +40,30 @@ function isProject(value: unknown): value is Project {
   return typeof value === 'object' && value !== null && typeof (value as Project).id === 'string';
 }
 
+function getWorkspaceId(req: IncomingMessage): string {
+  const headerValue = req.headers['x-workspace-id'];
+  const workspaceId = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (typeof workspaceId === 'string' && workspaceId.trim()) {
+    return workspaceId;
+  }
+  return 'anonymous';
+}
+
 async function handleAppState(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const pathname = getPathname(req);
   const method = req.method || 'GET';
+  const workspaceId = getWorkspaceId(req);
 
   if (pathname === '/api/app-state') {
     if (method === 'GET') {
-      const state = await readPersistedState();
+      const state = await readPersistedState(workspaceId);
       sendJson(res, 200, { success: true, data: state });
       return true;
     }
 
     if (method === 'PUT') {
       const body = await readJsonBody<{ projects?: Project[] }>(req);
-      const state = await writePersistedState({ projects: Array.isArray(body.projects) ? body.projects : [] });
+      const state = await writePersistedState(workspaceId, { projects: Array.isArray(body.projects) ? body.projects : [] });
       sendJson(res, 200, { success: true, data: state });
       return true;
     }
@@ -61,7 +71,7 @@ async function handleAppState(req: IncomingMessage, res: ServerResponse): Promis
 
   if (pathname === '/api/projects') {
     if (method === 'GET') {
-      const projects = await listProjects();
+      const projects = await listProjects(workspaceId);
       sendJson(res, 200, { success: true, data: projects });
       return true;
     }
@@ -72,7 +82,7 @@ async function handleAppState(req: IncomingMessage, res: ServerResponse): Promis
         sendJson(res, 422, { success: false, error: { message: '案件データが不正です。' } });
         return true;
       }
-      const state = await upsertProject(body);
+      const state = await upsertProject(workspaceId, body);
       sendJson(res, 200, { success: true, data: state.projects.find((project) => project.id === body.id) ?? body });
       return true;
     }
@@ -83,7 +93,7 @@ async function handleAppState(req: IncomingMessage, res: ServerResponse): Promis
     const projectId = decodeURIComponent(projectMatch[1]);
 
     if (method === 'GET') {
-      const project = await getProjectById(projectId);
+      const project = await getProjectById(workspaceId, projectId);
       if (!project) {
         sendJson(res, 404, { success: false, error: { message: '案件が見つかりません。' } });
         return true;
@@ -98,13 +108,13 @@ async function handleAppState(req: IncomingMessage, res: ServerResponse): Promis
         sendJson(res, 422, { success: false, error: { message: '案件IDが一致しません。' } });
         return true;
       }
-      const state = await upsertProject(body);
+      const state = await upsertProject(workspaceId, body);
       sendJson(res, 200, { success: true, data: state.projects.find((project) => project.id === projectId) ?? body });
       return true;
     }
 
     if (method === 'DELETE') {
-      const { deleted } = await deleteProjectById(projectId);
+      const { deleted } = await deleteProjectById(workspaceId, projectId);
       if (!deleted) {
         sendJson(res, 404, { success: false, error: { message: '案件が見つかりません。' } });
         return true;
@@ -117,7 +127,7 @@ async function handleAppState(req: IncomingMessage, res: ServerResponse): Promis
   const drawingsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/drawings$/);
   if (drawingsMatch && method === 'GET') {
     const projectId = decodeURIComponent(drawingsMatch[1]);
-    const project = await getProjectById(projectId);
+    const project = await getProjectById(workspaceId, projectId);
     if (!project) {
       sendJson(res, 404, { success: false, error: { message: '案件が見つかりません。' } });
       return true;

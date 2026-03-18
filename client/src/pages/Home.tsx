@@ -6,9 +6,10 @@ import InputForm from '@/components/InputForm';
 import CalculationResults from '@/components/CalculationResults';
 import SaveBar from '@/components/SaveBar';
 import OcrReviewPanel from '@/components/OcrReviewPanel';
+import type { OcrReviewPanelHandle } from '@/components/OcrReviewPanel';
 import DocumentPanel from '@/components/DocumentPanel';
 import { calculate } from '@/lib/calculations';
-import { fetchMasters, generateReport, getAiApiUnavailableMessage, isAiApiAvailable, parseDrawing } from '@/lib/api';
+import { fetchMasters, generateReport, getAiApiUnavailableMessage, isAiApiAvailable, parseDrawing, type OcrParseJobState } from '@/lib/api';
 import { canonicalizeMasterName, createSeedMasterItems } from '@/lib/masterData';
 import {
   createDefaultBlock,
@@ -59,13 +60,20 @@ const EMPTY_REPORT_BUNDLE: GeneratedReportBundle = {
   },
 };
 
-function GuideStep({ step, title, description }: { step: string; title: string; description: string }) {
+function GuideStep({ step, title, description, onActivate }: { step: string; title: string; description: string; onActivate?: () => void }) {
+  const isInteractive = typeof onActivate === 'function';
+
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+    <button
+      type="button"
+      onClick={onActivate}
+      className={`w-full rounded-md border px-3 py-2 text-left ${isInteractive ? 'border-indigo-200 bg-indigo-50 transition-colors hover:bg-indigo-100' : 'border-slate-200 bg-slate-50'}`}
+    >
       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{step}</div>
       <div className="mt-1 text-sm font-semibold text-slate-800">{title}</div>
       <p className="mt-1 text-xs leading-5 text-slate-600">{description}</p>
-    </div>
+      {isInteractive && <div className="mt-2 text-[11px] font-semibold text-indigo-700">クリックでアップロードを開始</div>}
+    </button>
   );
 }
 
@@ -254,12 +262,14 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const [initialized, setInitialized] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatusMessage, setUploadStatusMessage] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [hoveredCandidateId, setHoveredCandidateId] = useState<string | null>(null);
   const [activeOcrItemId, setActiveOcrItemId] = useState<string | null>(null);
   const [masters, setMasters] = useState<PriceMasterItem[]>([]);
   const [reportBundle, setReportBundle] = useState<GeneratedReportBundle>(EMPTY_REPORT_BUNDLE);
   const [reportError, setReportError] = useState<string | null>(null);
+  const ocrReviewPanelRef = useRef<OcrReviewPanelHandle | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -396,6 +406,17 @@ export default function Home({ preferredBlockType }: HomeProps) {
     });
   }, []);
 
+  const handleOcrJobProgress = useCallback((job: OcrParseJobState) => {
+    const label = job.status === 'queued'
+      ? 'OCRジョブを登録しました。解析待ちです。'
+      : job.status === 'processing'
+        ? 'OCR解析中です。ページ変換と候補抽出を実行しています。'
+        : job.status === 'completed'
+          ? 'OCR解析が完了しました。'
+          : job.error?.message || 'OCR解析ジョブが失敗しました。';
+    setUploadStatusMessage(label);
+  }, []);
+
   const handleProjectMetaChange = useCallback((field: 'name' | 'clientName' | 'siteName', value: string) => {
     replaceActiveProject((project) => ({ ...project, [field]: value }));
   }, [replaceActiveProject]);
@@ -439,6 +460,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
     setSelectedCandidateId(null);
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
+    setUploadStatusMessage(null);
   }, [appState, preferredBlockType]);
 
   const handleSelectProject = useCallback((projectId: string) => {
@@ -456,6 +478,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
       };
     });
     setUploadError(null);
+    setUploadStatusMessage(null);
     setSelectedCandidateId(null);
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
@@ -505,24 +528,39 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const handleSelectDrawing = useCallback((drawingId: string) => {
     setAppState((prev) => (prev ? { ...prev, activeDrawingId: drawingId } : prev));
     setUploadError(null);
+    setUploadStatusMessage(null);
     setSelectedCandidateId(null);
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
   }, []);
+
+  const handleActivateStep2 = useCallback(() => {
+    ocrReviewPanelRef.current?.focusPanel();
+    if (uploadDisabledReason) {
+      setUploadError(uploadDisabledReason);
+      toast.error(uploadDisabledReason);
+      return;
+    }
+    ocrReviewPanelRef.current?.focusAndOpenUpload();
+  }, [uploadDisabledReason]);
 
   const handleUploadFile = useCallback(async (file: File) => {
     if (!activeProject || !activeBlock) return;
     if (!isAiApiAvailable()) {
       const message = getAiApiUnavailableMessage();
       setUploadError(message);
+      setUploadStatusMessage(null);
       toast.error(message);
       return;
     }
     setUploadError(null);
     setIsUploading(true);
+    setUploadStatusMessage('OCRジョブを作成中です。');
 
     try {
-      const payload = await parseDrawing(file, activeBlock.blockType);
+      const payload = await parseDrawing(file, activeBlock.blockType, {
+        onProgress: handleOcrJobProgress,
+      });
       const nextDrawing = buildDrawingFromParseResponse(
         activeProject.id,
         file,
@@ -548,15 +586,17 @@ export default function Home({ preferredBlockType }: HomeProps) {
       setSelectedCandidateId(nextDrawing.aiCandidates[0]?.id ?? null);
       setHoveredCandidateId(null);
       setActiveOcrItemId(nextDrawing.ocrItems[0]?.id ?? null);
+      setUploadStatusMessage(null);
       toast.success(`図面を解析しました。OCR ${nextDrawing.ocrItems.length} 行、候補 ${nextDrawing.aiCandidates.length} 件です。`);
     } catch (error) {
       const message = error instanceof Error ? error.message : '図面解析に失敗しました。';
       setUploadError(message);
+      setUploadStatusMessage(null);
       toast.error(message);
     } finally {
       setIsUploading(false);
     }
-  }, [activeBlock, activeProject, masters, replaceActiveProject]);
+  }, [activeBlock, activeProject, handleOcrJobProgress, masters, replaceActiveProject]);
 
   const handleApplyCandidate = useCallback((candidateId: string) => {
     if (!activeProject || !activeBlock || !activeDrawing) return;
@@ -694,7 +734,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
             </div>
             <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-1">
               <GuideStep step="STEP 1" title="工種別見積を選ぶ" description="二次製品・擁壁・舗装・撤去のどれを見積るか選びます。" />
-              <GuideStep step="STEP 2" title="図面を OCR 解析" description="PDF または画像をアップロードすると OCR と候補が生成されます。" />
+              <GuideStep step="STEP 2" title="図面を OCR 解析" description="クリックすると OCR 画面へ移動し、PDF または画像の選択を開きます。" onActivate={handleActivateStep2} />
               <GuideStep step="STEP 3" title="候補を確認して帳票化" description="根拠 bbox を見ながら候補を反映し、見積書・単価根拠表・要確認一覧を生成します。" />
             </div>
           </div>
@@ -716,6 +756,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
           </div>
 
           <OcrReviewPanel
+            ref={ocrReviewPanelRef}
             drawings={activeProject.drawings}
             activeDrawingId={activeDrawing?.id ?? appState.activeDrawingId}
             activeOcrItemId={activeOcrItemId}
@@ -723,6 +764,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
             isUploading={isUploading}
             uploadError={uploadError}
             uploadDisabledReason={uploadDisabledReason}
+            uploadStatusMessage={uploadStatusMessage}
             onUploadFile={handleUploadFile}
             onSelectDrawing={handleSelectDrawing}
             onSelectOcrItem={handleSelectOcrItem}

@@ -1,6 +1,7 @@
 import type { AppState, EstimateBlock, Project } from './types';
 import { createDefaultBlock, createDefaultProject, createInitialAppState } from './types';
 import { resolveAppApiUrl } from './api';
+import { getWorkspaceHeaders, getWorkspaceId } from './workspace';
 
 const LEGACY_STORAGE_KEY = 'my-estimator-data';
 const UI_STORAGE_KEY = 'my-estimator-ui-meta';
@@ -17,8 +18,13 @@ interface ServerStateResponse {
   data?: {
     projects?: Project[];
     updatedAt?: string | null;
+    workspaceId?: string | null;
   };
   projects?: Project[];
+}
+
+function workspaceStorageKey(baseKey: string): string {
+  return `${baseKey}:${getWorkspaceId()}`;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -82,10 +88,18 @@ function normalizeState(raw: unknown): AppState {
 }
 
 function loadLegacyLocalState(): AppState | null {
+  const scopedKey = workspaceStorageKey(LEGACY_STORAGE_KEY);
   try {
-    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return null;
-    return normalizeState(JSON.parse(raw));
+    const scopedRaw = localStorage.getItem(scopedKey);
+    if (scopedRaw) {
+      return normalizeState(JSON.parse(scopedRaw));
+    }
+
+    const globalRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!globalRaw) return null;
+    const migrated = normalizeState(JSON.parse(globalRaw));
+    localStorage.setItem(scopedKey, JSON.stringify(migrated));
+    return migrated;
   } catch (error) {
     console.error('Failed to load local fallback data:', error);
     return null;
@@ -111,8 +125,9 @@ function normalizeUiMeta(raw: unknown, fallback: AppState): UiStateMeta {
 }
 
 function loadUiMeta(fallback: AppState): UiStateMeta {
+  const scopedKey = workspaceStorageKey(UI_STORAGE_KEY);
   try {
-    const raw = localStorage.getItem(UI_STORAGE_KEY);
+    const raw = localStorage.getItem(scopedKey);
     if (!raw) {
       return normalizeUiMeta(null, fallback);
     }
@@ -148,6 +163,7 @@ function mergeProjectsWithUi(projects: Project[], uiMeta: UiStateMeta): AppState
 }
 
 function saveUiMeta(data: AppState): void {
+  const scopedKey = workspaceStorageKey(UI_STORAGE_KEY);
   try {
     const payload: UiStateMeta = {
       activeProjectId: data.activeProjectId,
@@ -155,7 +171,7 @@ function saveUiMeta(data: AppState): void {
       activeBlockId: data.activeBlockId,
       autoSave: data.autoSave,
     };
-    localStorage.setItem(UI_STORAGE_KEY, JSON.stringify(payload));
+    localStorage.setItem(scopedKey, JSON.stringify(payload));
   } catch (error) {
     console.error('Failed to save UI state meta:', error);
   }
@@ -163,7 +179,9 @@ function saveUiMeta(data: AppState): void {
 
 async function loadServerProjects(): Promise<Project[] | null> {
   try {
-    const response = await fetch(resolveAppApiUrl('/api/app-state'));
+    const response = await fetch(resolveAppApiUrl('/api/app-state'), {
+      headers: getWorkspaceHeaders(),
+    });
     if (!response.ok) {
       return null;
     }
@@ -186,6 +204,7 @@ async function saveServerProjects(projects: Project[]): Promise<void> {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
+      ...getWorkspaceHeaders(),
     },
     body: JSON.stringify({ projects }),
   });
@@ -202,7 +221,7 @@ export async function loadData(): Promise<AppState> {
 
   if (serverProjects && serverProjects.length > 0) {
     const merged = mergeProjectsWithUi(serverProjects, uiMeta);
-    localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(merged));
+    localStorage.setItem(workspaceStorageKey(LEGACY_STORAGE_KEY), JSON.stringify(merged));
     return merged;
   }
 
@@ -223,7 +242,7 @@ export async function saveData(data: AppState): Promise<void> {
   }
 
   try {
-    localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(workspaceStorageKey(LEGACY_STORAGE_KEY), JSON.stringify(data));
   } catch (error) {
     console.error('Failed to save local fallback data:', error);
   }

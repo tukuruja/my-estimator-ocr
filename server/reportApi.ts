@@ -25,7 +25,16 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
   return JSON.parse(Buffer.concat(chunks).toString('utf-8')) as T;
 }
 
-async function resolveContext(body: ReportGenerationRequest): Promise<{ project: Project; block: EstimateBlock; drawing: Drawing | null; effectiveDate: string }> {
+function getWorkspaceId(req: IncomingMessage): string {
+  const headerValue = req.headers['x-workspace-id'];
+  const workspaceId = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (typeof workspaceId === 'string' && workspaceId.trim()) {
+    return workspaceId;
+  }
+  return 'anonymous';
+}
+
+async function resolveContext(req: IncomingMessage, body: ReportGenerationRequest): Promise<{ project: Project; block: EstimateBlock; drawing: Drawing | null; effectiveDate: string }> {
   const effectiveDate = body.effectiveDate ?? new Date().toISOString().slice(0, 10);
 
   if (body.project && body.block) {
@@ -41,7 +50,7 @@ async function resolveContext(body: ReportGenerationRequest): Promise<{ project:
     throw new Error('帳票生成には project/block のスナップショット、または projectId/blockId が必要です。');
   }
 
-  const project = await getProjectById(body.projectId);
+  const project = await getProjectById(getWorkspaceId(req), body.projectId);
   if (!project) {
     throw new Error('案件が見つかりません。');
   }
@@ -62,7 +71,7 @@ async function handleReportApi(req: IncomingMessage, res: ServerResponse): Promi
   }
 
   const body = await readJsonBody<ReportGenerationRequest>(req);
-  const { project, block, drawing, effectiveDate } = await resolveContext(body);
+  const { project, block, drawing, effectiveDate } = await resolveContext(req, body);
   const masters = await listMasterItems({ effectiveDate });
   const result = calculate(block, { masters, effectiveDate });
   const bundle = generateReportBundle({ project, block, drawing, result });

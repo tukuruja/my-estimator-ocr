@@ -5,13 +5,14 @@ import json
 import os
 import re
 import uuid
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
 import fitz
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, ImageStat
@@ -26,7 +27,9 @@ except ModuleNotFoundError as exc:  # pragma: no cover - compatibility fallback
 BASE_DIR = Path(__file__).resolve().parent
 STORAGE_DIR = BASE_DIR / "storage"
 PREVIEW_DIR = STORAGE_DIR / "previews"
+JOB_DIR = STORAGE_DIR / "jobs"
 PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+JOB_DIR.mkdir(parents=True, exist_ok=True)
 PRODUCT_MASTER_SOURCE = BASE_DIR.parent / "client" / "src" / "lib" / "priceData.ts"
 OCR_REVIEW_SCORE_THRESHOLD = 0.75
 
@@ -533,8 +536,30 @@ def save_preview_image(image: Image.Image) -> str:
     return file_name
 
 
+def build_image_url_from_base(base_url: str, relative_path: str) -> str:
+    return f"{base_url.rstrip('/')}/files/{relative_path.lstrip('/')}"
+
+
 def build_image_url(request: Request, relative_path: str) -> str:
-    return f"{str(request.base_url).rstrip('/')}/files/{relative_path}"
+    return build_image_url_from_base(str(request.base_url), relative_path)
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def validate_upload(file_name: str | None, file_bytes: bytes, content_type: str | None) -> str:
+    if not file_name:
+        raise HTTPException(status_code=400, detail="ファイル名がありません")
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="空ファイルは解析できません")
+    if len(file_bytes) > 30 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="ファイルサイズが上限を超えています")
+
+    file_type = "pdf" if content_type == "application/pdf" or file_name.lower().endswith(".pdf") else "image"
+    if file_type not in {"pdf", "image"}:
+        raise HTTPException(status_code=400, detail="対応していないファイル形式です")
+    return file_type
 
 
 def page_items(ocr_items: list[dict[str, Any]], page_no: int) -> list[dict[str, Any]]:
@@ -1005,55 +1030,50 @@ def extract_candidates(ocr_items: list[dict[str, Any]], mode: str) -> dict[str, 
     return candidates
 
 
-@app.get("/health")
-def health() -> dict[str, Any]:
-    return {"success": True, "status": "ok"}
+def resolve_job_dir(job_id: str) -> Path:
+    normalized_job_id = re.sub(r"[^a-zA-Z0-9_-]", "", job_id)
+    if not normalized_job_id:
+        raise HTTPException(status_code=404, detail="OCRジョブが見つかりません")
+    return JOB_DIR / normalized_job_id
 
 
-@app.get("/healthz")
-def healthz() -> dict[str, Any]:
-    return {
-        "success": True,
-        "status": "ok",
-        "ocrPackLoaded": OCR_PACK_DIR is not None,
-        "sheetTypeCount": len(SHEET_TYPE_ROWS),
-        "promptCount": len(PROMPT_DEFINITIONS.get("prompts", [])),
-    }
+def read_job_state(job_id: str) -> dict[str, Any]:
+    job_dir = resolve_job_dir(job_id)
+    state_path = job_dir / "state.json"
+    if not state_path.exists():
+        raise HTTPException(status_code=404, detail="OCRジョブが見つかりません")
+    return json.loads(state_path.read_text(encoding="utf-8"))
 
 
-@app.post("/api/ocr/parse-drawing")
-async def parse_drawing(
-    request: Request,
-    file: UploadFile = File(...),
-    mode: str = Form("secondary_product"),
+def write_job_state(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    job_dir = resolve_job_dir(job_id)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    state_path = job_dir / "state.json"
+    state_path.write_text(f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n", encoding="utf-8")
+    return payload
+
+
+def process_drawing_payload(
+    *,
+    base_url: str,
+    file_name: str,
+    file_type: str,
+    file_bytes: bytes,
+    mode: str,
 ) -> dict[str, Any]:
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="ファイル名がありません")
-
-    file_bytes = await file.read()
-    if not file_bytes:
-        raise HTTPException(status_code=400, detail="空ファイルは解析できません")
-    if len(file_bytes) > 30 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="ファイルサイズが上限を超えています")
-
-    content_type = file.content_type or "application/octet-stream"
-    file_type = "pdf" if content_type == "application/pdf" or file.filename.lower().endswith(".pdf") else "image"
-    if file_type not in {"pdf", "image"}:
-        raise HTTPException(status_code=400, detail="対応していないファイル形式です")
-
     try:
         pages = render_pdf_pages(file_bytes) if file_type == "pdf" else load_image_pages(file_bytes)
     except Exception as exc:  # pragma: no cover - depends on user input
         raise HTTPException(status_code=422, detail=f"図面の読み込みに失敗しました: {exc}") from exc
 
-    media_route = determine_media_route(file.filename, file_type, file_bytes, pages)
+    media_route = determine_media_route(file_name, file_type, file_bytes, pages)
     all_ocr_items: list[dict[str, Any]] = []
     page_previews: list[dict[str, Any]] = []
 
     for index, page_image in enumerate(pages, start=1):
         preview_file_name = save_preview_image(page_image)
         page_previews.append({
-            "imageUrl": build_image_url(request, f"previews/{preview_file_name}"),
+            "imageUrl": build_image_url_from_base(base_url, f"previews/{preview_file_name}"),
             "width": page_image.width,
             "height": page_image.height,
             "page": index,
@@ -1083,7 +1103,7 @@ async def parse_drawing(
 
     return {
         "drawingSource": {
-            "fileName": file.filename,
+            "fileName": file_name,
             "fileType": file_type,
             "pageCount": len(pages),
         },
@@ -1108,3 +1128,114 @@ async def parse_drawing(
             "symbol_seed_count": len(SYMBOL_SEED_MASTER),
         },
     }
+
+
+def run_ocr_job(job_id: str, input_path: str, file_name: str, file_type: str, mode: str, base_url: str) -> None:
+    state = read_job_state(job_id)
+    state["status"] = "processing"
+    state["progressMessage"] = "OCR解析中です。ページ変換と候補抽出を実行しています。"
+    state["updatedAt"] = utc_now_iso()
+    write_job_state(job_id, state)
+
+    try:
+        file_bytes = Path(input_path).read_bytes()
+        result = process_drawing_payload(
+            base_url=base_url,
+            file_name=file_name,
+            file_type=file_type,
+            file_bytes=file_bytes,
+            mode=mode,
+        )
+        state["status"] = "completed"
+        state["progressMessage"] = "OCR解析が完了しました。"
+        state["result"] = result
+        state.pop("error", None)
+    except HTTPException as exc:
+        state["status"] = "failed"
+        state["progressMessage"] = "OCR解析ジョブが失敗しました。"
+        state["error"] = {"message": str(exc.detail)}
+    except Exception as exc:  # pragma: no cover - runtime safety
+        state["status"] = "failed"
+        state["progressMessage"] = "OCR解析ジョブが失敗しました。"
+        state["error"] = {"message": f"OCR解析に失敗しました: {exc}"}
+
+    state["updatedAt"] = utc_now_iso()
+    write_job_state(job_id, state)
+
+
+@app.get("/health")
+def health() -> dict[str, Any]:
+    return {"success": True, "status": "ok"}
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, Any]:
+    return {
+        "success": True,
+        "status": "ok",
+        "ocrPackLoaded": OCR_PACK_DIR is not None,
+        "sheetTypeCount": len(SHEET_TYPE_ROWS),
+        "promptCount": len(PROMPT_DEFINITIONS.get("prompts", [])),
+    }
+
+
+@app.post("/api/ocr/jobs")
+async def create_parse_drawing_job(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    mode: str = Form("secondary_product"),
+) -> dict[str, Any]:
+    file_bytes = await file.read()
+    file_type = validate_upload(file.filename, file_bytes, file.content_type)
+
+    job_id = uuid.uuid4().hex
+    job_dir = resolve_job_dir(job_id)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    source_suffix = ".pdf" if file_type == "pdf" else ".bin"
+    source_path = job_dir / f"source{source_suffix}"
+    source_path.write_bytes(file_bytes)
+
+    state = {
+        "jobId": job_id,
+        "status": "queued",
+        "progressMessage": "OCRジョブを登録しました。解析待ちです。",
+        "createdAt": utc_now_iso(),
+        "updatedAt": utc_now_iso(),
+        "fileName": file.filename,
+        "fileType": file_type,
+        "mode": mode,
+    }
+    write_job_state(job_id, state)
+    background_tasks.add_task(
+        run_ocr_job,
+        job_id,
+        str(source_path),
+        file.filename or "drawing",
+        file_type,
+        mode,
+        str(request.base_url),
+    )
+    return state
+
+
+@app.get("/api/ocr/jobs/{job_id}")
+def get_parse_drawing_job(job_id: str) -> dict[str, Any]:
+    return read_job_state(job_id)
+
+
+@app.post("/api/ocr/parse-drawing")
+async def parse_drawing(
+    request: Request,
+    file: UploadFile = File(...),
+    mode: str = Form("secondary_product"),
+) -> dict[str, Any]:
+    file_bytes = await file.read()
+    file_type = validate_upload(file.filename, file_bytes, file.content_type)
+    return process_drawing_payload(
+        base_url=str(request.base_url),
+        file_name=file.filename or "drawing",
+        file_type=file_type,
+        file_bytes=file_bytes,
+        mode=mode,
+    )
