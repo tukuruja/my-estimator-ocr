@@ -151,10 +151,10 @@ export default function ConsensusBlueprintPage() {
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <Database className="h-4 w-4 text-amber-600" />
-                  統合ポイント
+                  知識パック
                 </div>
-                <div className="mt-3 text-3xl font-bold text-slate-900">{blueprint.integrationPoints.length}</div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">現行サイトのどこへ組み込むかを、ファイル単位で固定しています。</p>
+                <div className="mt-3 text-3xl font-bold text-slate-900">{blueprint.knowledgePacks.length}</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">数量拾いに direct / guardrail / future scope のどれで効くかを固定しています。</p>
               </div>
             </section>
 
@@ -177,6 +177,35 @@ export default function ConsensusBlueprintPage() {
               </div>
             </section>
 
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <Database className="h-4 w-4 text-amber-600" />
+                quantity knowledge packs
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {blueprint.knowledgePacks.map((pack) => (
+                  <div key={pack.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-slate-900">{pack.name}</div>
+                      <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+                        {pack.outputMode}
+                      </span>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-slate-700">{pack.purpose}</p>
+                    <div className="mt-3 text-xs leading-5 text-slate-600">発火条件: {pack.activationRule}</div>
+                    <div className="mt-2 text-xs leading-5 text-slate-600">数量影響: {pack.quantityImpact}</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {pack.quantityTargets.map((target) => (
+                        <span key={target} className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700">
+                          {target}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
             <section className="grid gap-4 lg:grid-cols-2">
               <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="text-sm font-semibold text-slate-900">最終合意</div>
@@ -191,18 +220,30 @@ export default function ConsensusBlueprintPage() {
               </section>
 
               <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="text-sm font-semibold text-slate-900">サイト統合ポイント</div>
+                <div className="text-sm font-semibold text-slate-900">数量拾いプロトコル</div>
                 <div className="mt-3 space-y-3">
-                  {blueprint.integrationPoints.map((point) => (
-                    <div key={`${point.phase}-${point.target}`} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{point.phase}</div>
-                      <div className="mt-1 text-sm font-semibold text-slate-900">{point.target}</div>
-                      <p className="mt-2 text-sm leading-6 text-slate-700">{point.purpose}</p>
-                      <div className="mt-2 text-xs leading-5 text-slate-600">実装: {point.implementation}</div>
+                  {blueprint.quantityExtractionProtocol.map((item, index) => (
+                    <div key={item} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+                      <span className="mr-2 font-semibold text-slate-900">{index + 1}.</span>
+                      {item}
                     </div>
                   ))}
                 </div>
               </section>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="text-sm font-semibold text-slate-900">サイト統合ポイント</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {blueprint.integrationPoints.map((point) => (
+                  <div key={`${point.phase}-${point.target}`} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{point.phase}</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-900">{point.target}</div>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">{point.purpose}</p>
+                    <div className="mt-2 text-xs leading-5 text-slate-600">実装: {point.implementation}</div>
+                  </div>
+                ))}
+              </div>
             </section>
 
             <section className="grid gap-4 xl:grid-cols-2">
@@ -217,6 +258,32 @@ export default function ConsensusBlueprintPage() {
                 value={preview ?? { message: 'active project / block が無いため preview request は未生成です。' }}
               />
             </section>
+
+            {preview?.context?.selectedKnowledgePacks && (
+              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-sm font-semibold text-slate-900">現在案件での知識パック適用結果</div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {preview.context.selectedKnowledgePacks.map((pack) => (
+                    <div key={pack.knowledgePackId} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold text-slate-900">{pack.name}</div>
+                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-700">
+                          {pack.status}
+                        </span>
+                      </div>
+                      <div className="mt-2 text-sm leading-6 text-slate-700">{pack.reason}</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {pack.quantityTargets.map((target) => (
+                          <span key={target} className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700">
+                            {target}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
@@ -235,6 +302,9 @@ export default function ConsensusBlueprintPage() {
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
                   4. ただし unknown な現場条件は今も未入力なので、合意エンジンの出力は停止条件と要確認を残す設計です。
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+                  5. 今回は knowledge pack selection と quantityReviewMatrix を schema に追加したので、数量ごとにどの知識が効いたかを trace できます。
                 </div>
               </div>
             </section>

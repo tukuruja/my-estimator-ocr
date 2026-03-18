@@ -31,6 +31,7 @@ COPY patches ./patches
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/server/data/drawing-ocr-pack ./server-pack-data/drawing-ocr-pack
 
 EXPOSE 8080
 

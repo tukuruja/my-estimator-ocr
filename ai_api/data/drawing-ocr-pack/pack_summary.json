@@ -1,0 +1,26 @@
+[
+  {
+    "metric": "knowledge_rows",
+    "value": "69"
+  },
+  {
+    "metric": "sheet_type_rows",
+    "value": "56"
+  },
+  {
+    "metric": "abbreviation_rows",
+    "value": "90"
+  },
+  {
+    "metric": "symbol_seed_rows",
+    "value": "38"
+  },
+  {
+    "metric": "skill_module_rows",
+    "value": "15"
+  },
+  {
+    "metric": "prompt_rows",
+    "value": "15"
+  }
+]

@@ -1,0 +1,1036 @@
+{
+  "skill_pack_name": "drawing_ocr_codex_skill_pack",
+  "skill_version": "v1.0",
+  "domain": "construction_drawing_ocr",
+  "record_model": "knowledge_master + dictionaries + prompt_router + skill_modules",
+  "objective": "建設業の図面を、媒体判定→表題欄抽出→シート分類→単位/縮尺/凡例解決→工種別抽出→図面間リンク→数量拾いマッピング→QAの順で読むためのCodexスキルパック",
+  "global_policy": {
+    "media_priority": [
+      "ifc",
+      "cad",
+      "embedded_text_pdf",
+      "vector_pdf",
+      "raster_pdf",
+      "image"
+    ],
+    "legend_priority": "図面固有凡例 > 標準辞書 > unknown",
+    "document_priority": [
+      "rfi",
+      "site_explanation",
+      "special_spec",
+      "drawing",
+      "standard_spec"
+    ],
+    "confidence_policy": {
+      "auto_accept_min": 0.85,
+      "needs_review_below": 0.75,
+      "block_conditions": [
+        "必須項目欠落",
+        "主要シートの分類不明",
+        "単位未解決",
+        "高重要度conflict残存"
+      ]
+    }
+  },
+  "master_files": {
+    "knowledge_master_csv": "drawing_ocr_knowledge_master.csv",
+    "sheet_type_master_csv": "drawing_ocr_sheet_type_master.csv",
+    "abbreviation_master_csv": "drawing_ocr_abbreviation_master.csv",
+    "symbol_seed_master_csv": "drawing_ocr_symbol_seed_master.csv",
+    "skill_import_csv": "drawing_ocr_skill_import.csv",
+    "field_dictionary_csv": "drawing_ocr_field_dictionary.csv",
+    "prompt_definitions_json": "drawing_ocr_prompt_definitions.json",
+    "prompt_templates_md": "drawing_ocr_prompt_templates.md"
+  },
+  "input_contract": {
+    "minimum_inputs": [
+      "file_name",
+      "mime_type",
+      "page_count",
+      "page_preview",
+      "sheet_image"
+    ],
+    "optional_inputs": [
+      "text_layer_probe",
+      "vector_probe",
+      "drawing_index",
+      "spec_notes",
+      "building_context"
+    ]
+  },
+  "output_contract": {
+    "minimum_outputs": [
+      "drawing_no",
+      "drawing_title",
+      "sheet_type_id",
+      "discipline",
+      "review_queue",
+      "acceptance_status"
+    ],
+    "trade_specific_outputs": [
+      "rooms",
+      "struct_members",
+      "fixtures",
+      "pipes",
+      "alignment",
+      "quantity_items"
+    ]
+  },
+  "sheet_types": [
+    {
+      "sheet_type_id": "SHT_001",
+      "discipline": "共通",
+      "sheet_type_name": "表紙",
+      "canonical_key": "project_cover"
+    },
+    {
+      "sheet_type_id": "SHT_002",
+      "discipline": "共通",
+      "sheet_type_name": "図面目録",
+      "canonical_key": "drawing_index"
+    },
+    {
+      "sheet_type_id": "SHT_003",
+      "discipline": "共通",
+      "sheet_type_name": "特記仕様参照図",
+      "canonical_key": "spec_reference"
+    },
+    {
+      "sheet_type_id": "SHT_004",
+      "discipline": "共通",
+      "sheet_type_name": "工区・棟区分図",
+      "canonical_key": "zone_building_index"
+    },
+    {
+      "sheet_type_id": "SHT_101",
+      "discipline": "建築",
+      "sheet_type_name": "案内図",
+      "canonical_key": "location_map"
+    },
+    {
+      "sheet_type_id": "SHT_102",
+      "discipline": "建築",
+      "sheet_type_name": "配置図",
+      "canonical_key": "site_plan"
+    },
+    {
+      "sheet_type_id": "SHT_103",
+      "discipline": "建築",
+      "sheet_type_name": "各階平面図",
+      "canonical_key": "floor_plan"
+    },
+    {
+      "sheet_type_id": "SHT_104",
+      "discipline": "建築",
+      "sheet_type_name": "平面詳細図",
+      "canonical_key": "detailed_floor_plan"
+    },
+    {
+      "sheet_type_id": "SHT_105",
+      "discipline": "建築",
+      "sheet_type_name": "立面図",
+      "canonical_key": "elevation"
+    },
+    {
+      "sheet_type_id": "SHT_106",
+      "discipline": "建築",
+      "sheet_type_name": "断面図",
+      "canonical_key": "section"
+    },
+    {
+      "sheet_type_id": "SHT_107",
+      "discipline": "建築",
+      "sheet_type_name": "矩計図",
+      "canonical_key": "wall_section_detail"
+    },
+    {
+      "sheet_type_id": "SHT_108",
+      "discipline": "建築",
+      "sheet_type_name": "展開図",
+      "canonical_key": "interior_elevation"
+    },
+    {
+      "sheet_type_id": "SHT_109",
+      "discipline": "建築",
+      "sheet_type_name": "天井伏図",
+      "canonical_key": "ceiling_plan"
+    },
+    {
+      "sheet_type_id": "SHT_110",
+      "discipline": "建築",
+      "sheet_type_name": "基礎伏図",
+      "canonical_key": "foundation_plan"
+    },
+    {
+      "sheet_type_id": "SHT_111",
+      "discipline": "建築",
+      "sheet_type_name": "建具表",
+      "canonical_key": "door_window_schedule"
+    },
+    {
+      "sheet_type_id": "SHT_112",
+      "discipline": "建築",
+      "sheet_type_name": "仕上表",
+      "canonical_key": "finish_schedule"
+    },
+    {
+      "sheet_type_id": "SHT_113",
+      "discipline": "建築",
+      "sheet_type_name": "面積表",
+      "canonical_key": "area_schedule"
+    },
+    {
+      "sheet_type_id": "SHT_114",
+      "discipline": "建築",
+      "sheet_type_name": "外構詳細図",
+      "canonical_key": "site_detail"
+    },
+    {
+      "sheet_type_id": "SHT_115",
+      "discipline": "建築",
+      "sheet_type_name": "植栽図",
+      "canonical_key": "landscape_plan"
+    },
+    {
+      "sheet_type_id": "SHT_116",
+      "discipline": "建築",
+      "sheet_type_name": "仮設計画図",
+      "canonical_key": "temporary_works_plan"
+    },
+    {
+      "sheet_type_id": "SHT_201",
+      "discipline": "構造",
+      "sheet_type_name": "構造共通事項",
+      "canonical_key": "struct_general_notes"
+    },
+    {
+      "sheet_type_id": "SHT_202",
+      "discipline": "構造",
+      "sheet_type_name": "杭伏図",
+      "canonical_key": "pile_plan"
+    },
+    {
+      "sheet_type_id": "SHT_203",
+      "discipline": "構造",
+      "sheet_type_name": "基礎配筋図",
+      "canonical_key": "foundation_rebar"
+    },
+    {
+      "sheet_type_id": "SHT_204",
+      "discipline": "構造",
+      "sheet_type_name": "各階床伏図",
+      "canonical_key": "framing_plan"
+    },
+    {
+      "sheet_type_id": "SHT_205",
+      "discipline": "構造",
+      "sheet_type_name": "柱リスト",
+      "canonical_key": "column_schedule"
+    },
+    {
+      "sheet_type_id": "SHT_206",
+      "discipline": "構造",
+      "sheet_type_name": "梁リスト",
+      "canonical_key": "beam_schedule"
+    },
+    {
+      "sheet_type_id": "SHT_207",
+      "discipline": "構造",
+      "sheet_type_name": "壁・床版配筋詳細",
+      "canonical_key": "wall_slab_rebar_detail"
+    },
+    {
+      "sheet_type_id": "SHT_208",
+      "discipline": "構造",
+      "sheet_type_name": "鉄骨一般図",
+      "canonical_key": "steel_general"
+    },
+    {
+      "sheet_type_id": "SHT_209",
+      "discipline": "構造",
+      "sheet_type_name": "鉄骨詳細図",
+      "canonical_key": "steel_detail"
+    },
+    {
+      "sheet_type_id": "SHT_301",
+      "discipline": "電気",
+      "sheet_type_name": "電灯設備平面図",
+      "canonical_key": "lighting_plan"
+    },
+    {
+      "sheet_type_id": "SHT_302",
+      "discipline": "電気",
+      "sheet_type_name": "コンセント・動力平面図",
+      "canonical_key": "power_plan"
+    },
+    {
+      "sheet_type_id": "SHT_303",
+      "discipline": "電気",
+      "sheet_type_name": "受変電設備図",
+      "canonical_key": "substation_plan"
+    },
+    {
+      "sheet_type_id": "SHT_304",
+      "discipline": "電気",
+      "sheet_type_name": "単線結線図",
+      "canonical_key": "single_line_diagram"
+    },
+    {
+      "sheet_type_id": "SHT_305",
+      "discipline": "電気",
+      "sheet_type_name": "盤結線図",
+      "canonical_key": "panel_schedule"
+    },
+    {
+      "sheet_type_id": "SHT_306",
+      "discipline": "電気",
+      "sheet_type_name": "通信情報設備図",
+      "canonical_key": "telecom_plan"
+    },
+    {
+      "sheet_type_id": "SHT_307",
+      "discipline": "電気",
+      "sheet_type_name": "火災報知設備図",
+      "canonical_key": "fire_alarm_plan"
+    },
+    {
+      "sheet_type_id": "SHT_308",
+      "discipline": "電気",
+      "sheet_type_name": "中央監視・防犯設備図",
+      "canonical_key": "bms_security_plan"
+    },
+    {
+      "sheet_type_id": "SHT_309",
+      "discipline": "電気",
+      "sheet_type_name": "構内配電・外灯図",
+      "canonical_key": "site_electrical"
+    },
+    {
+      "sheet_type_id": "SHT_401",
+      "discipline": "機械",
+      "sheet_type_name": "空調設備平面図",
+      "canonical_key": "hvac_plan"
+    },
+    {
+      "sheet_type_id": "SHT_402",
+      "discipline": "機械",
+      "sheet_type_name": "換気・排煙設備平面図",
+      "canonical_key": "vent_smoke_plan"
+    },
+    {
+      "sheet_type_id": "SHT_403",
+      "discipline": "機械",
+      "sheet_type_name": "衛生器具設備平面図",
+      "canonical_key": "sanitary_fixture_plan"
+    },
+    {
+      "sheet_type_id": "SHT_404",
+      "discipline": "機械",
+      "sheet_type_name": "給水設備平面図",
+      "canonical_key": "water_supply_plan"
+    },
+    {
+      "sheet_type_id": "SHT_405",
+      "discipline": "機械",
+      "sheet_type_name": "排水・通気設備平面図",
+      "canonical_key": "drain_vent_plan"
+    },
+    {
+      "sheet_type_id": "SHT_406",
+      "discipline": "機械",
+      "sheet_type_name": "消火設備平面図",
+      "canonical_key": "fire_fighting_plan"
+    },
+    {
+      "sheet_type_id": "SHT_407",
+      "discipline": "機械",
+      "sheet_type_name": "配管系統図",
+      "canonical_key": "piping_riser"
+    },
+    {
+      "sheet_type_id": "SHT_408",
+      "discipline": "機械",
+      "sheet_type_name": "ダクト系統図",
+      "canonical_key": "duct_riser"
+    },
+    {
+      "sheet_type_id": "SHT_409",
+      "discipline": "機械",
+      "sheet_type_name": "機器表",
+      "canonical_key": "equipment_schedule"
+    },
+    {
+      "sheet_type_id": "SHT_410",
+      "discipline": "機械",
+      "sheet_type_name": "自動制御図",
+      "canonical_key": "control_diagram"
+    },
+    {
+      "sheet_type_id": "SHT_501",
+      "discipline": "土木",
+      "sheet_type_name": "道路平面図",
+      "canonical_key": "road_plan"
+    },
+    {
+      "sheet_type_id": "SHT_502",
+      "discipline": "土木",
+      "sheet_type_name": "縦断面図",
+      "canonical_key": "road_profile"
+    },
+    {
+      "sheet_type_id": "SHT_503",
+      "discipline": "土木",
+      "sheet_type_name": "標準横断面図",
+      "canonical_key": "standard_cross_section"
+    },
+    {
+      "sheet_type_id": "SHT_504",
+      "discipline": "土木",
+      "sheet_type_name": "横断面図",
+      "canonical_key": "cross_section"
+    },
+    {
+      "sheet_type_id": "SHT_505",
+      "discipline": "土木",
+      "sheet_type_name": "土工計画図",
+      "canonical_key": "earthwork_plan"
+    },
+    {
+      "sheet_type_id": "SHT_506",
+      "discipline": "土木",
+      "sheet_type_name": "排水施設図",
+      "canonical_key": "site_drainage_plan"
+    },
+    {
+      "sheet_type_id": "SHT_507",
+      "discipline": "土木",
+      "sheet_type_name": "舗装構成図",
+      "canonical_key": "pavement_section"
+    },
+    {
+      "sheet_type_id": "SHT_508",
+      "discipline": "土木",
+      "sheet_type_name": "擁壁・小構造物図",
+      "canonical_key": "retaining_structure"
+    }
+  ],
+  "prompts": [
+    {
+      "prompt_id": "PRM_001",
+      "prompt_name": "媒体ルーター",
+      "objective": "入力ファイルの媒体種別と最適処理経路を判定する",
+      "when_to_run": "ページ読取の最初に実行"
+    },
+    {
+      "prompt_id": "PRM_002",
+      "prompt_name": "表題欄読取",
+      "objective": "表題欄から図面メタデータを抽出する",
+      "when_to_run": "媒体ルーティング後、シート単位で実行"
+    },
+    {
+      "prompt_id": "PRM_003",
+      "prompt_name": "シート分類",
+      "objective": "図面のシート種別を分類する",
+      "when_to_run": "表題欄読取の直後"
+    },
+    {
+      "prompt_id": "PRM_004",
+      "prompt_name": "単位・縮尺・方位解決",
+      "objective": "単位・縮尺・方位・視点方向を解決する",
+      "when_to_run": "シート分類後"
+    },
+    {
+      "prompt_id": "PRM_005",
+      "prompt_name": "凡例・略号解決",
+      "objective": "凡例・略号・材料コードを正規化する",
+      "when_to_run": "シート分類後、実体抽出前に実行"
+    },
+    {
+      "prompt_id": "PRM_006",
+      "prompt_name": "建築一般図抽出",
+      "objective": "建築一般図から室・壁・建具・仕上を抽出する",
+      "when_to_run": "sheet_typeが建築一般図のとき"
+    },
+    {
+      "prompt_id": "PRM_007",
+      "prompt_name": "構造図抽出",
+      "objective": "構造図から基礎・配筋・部材・接合を抽出する",
+      "when_to_run": "sheet_typeが構造図のとき"
+    },
+    {
+      "prompt_id": "PRM_008",
+      "prompt_name": "電気設備図抽出",
+      "objective": "電気設備図から器具・盤・回路・弱電を抽出する",
+      "when_to_run": "sheet_typeが電気設備図のとき"
+    },
+    {
+      "prompt_id": "PRM_009",
+      "prompt_name": "機械設備図抽出",
+      "objective": "機械設備図から機器・配管・ダクト・衛生器具を抽出する",
+      "when_to_run": "sheet_typeが機械設備図のとき"
+    },
+    {
+      "prompt_id": "PRM_010",
+      "prompt_name": "土木・道路図抽出",
+      "objective": "道路・造成・外構図から線形・断面・排水・舗装を抽出する",
+      "when_to_run": "sheet_typeが土木・道路・造成系のとき"
+    },
+    {
+      "prompt_id": "PRM_011",
+      "prompt_name": "改修・仮設解決",
+      "objective": "既存/撤去/新設/復旧と仮設制約を解釈する",
+      "when_to_run": "改修図・仮設図で実行"
+    },
+    {
+      "prompt_id": "PRM_012",
+      "prompt_name": "図面間リンク",
+      "objective": "複数図面を通り芯・室・符号・系統で接続する",
+      "when_to_run": "単票抽出の後に案件全体で実行"
+    },
+    {
+      "prompt_id": "PRM_013",
+      "prompt_name": "仕様優先順位解決",
+      "objective": "図面・特記・標準仕様の優先順位で矛盾を解く",
+      "when_to_run": "抽出後の仕様統合フェーズで実行"
+    },
+    {
+      "prompt_id": "PRM_014",
+      "prompt_name": "数量拾いマッピング",
+      "objective": "抽出済み情報を数量拾い用の項目へ変換する",
+      "when_to_run": "抽出・リンクの後で実行"
+    },
+    {
+      "prompt_id": "PRM_015",
+      "prompt_name": "QA・例外処理レビュー",
+      "objective": "低信頼・矛盾・未知語をレビューキューへ整理する",
+      "when_to_run": "全工程の最後に実行"
+    }
+  ],
+  "skills": [
+    {
+      "skill_id": "SK_OCR_01",
+      "skill_name": "媒体判定・前処理",
+      "triggers": [
+        "図面OCR",
+        "PDF判定",
+        "画像前処理"
+      ],
+      "description": "媒体種別、回転、分割、前処理フラグを確定する。",
+      "prompt_refs": [
+        "PRM_001"
+      ],
+      "knowledge_categories": [
+        "媒体ルーティング",
+        "OCR/CV処理"
+      ],
+      "required_inputs": [
+        "file_meta",
+        "page_preview"
+      ],
+      "outputs": [
+        "source_media_type",
+        "preferred_pipeline",
+        "page_rotation_deg",
+        "preprocess_flags"
+      ],
+      "handoff_to": [
+        "SK_OCR_02"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_02",
+      "skill_name": "表題欄・シートメタデータ抽出",
+      "triggers": [
+        "表題欄",
+        "図面番号",
+        "図面名",
+        "改訂"
+      ],
+      "description": "図面番号・図面名称・縮尺・改訂・棟工区を抽出する。",
+      "prompt_refs": [
+        "PRM_002"
+      ],
+      "knowledge_categories": [
+        "シートメタデータ"
+      ],
+      "required_inputs": [
+        "sheet_region",
+        "optional_index_sheet"
+      ],
+      "outputs": [
+        "drawing_no",
+        "drawing_title",
+        "sheet_scale",
+        "revision",
+        "discipline"
+      ],
+      "handoff_to": [
+        "SK_OCR_03"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_03",
+      "skill_name": "シート分類",
+      "triggers": [
+        "平面図判定",
+        "断面図判定",
+        "系統図判定"
+      ],
+      "description": "図面を建築/構造/電気/機械/土木系へ分類する。",
+      "prompt_refs": [
+        "PRM_003"
+      ],
+      "knowledge_categories": [
+        "建築図",
+        "構造図",
+        "電気設備図",
+        "機械設備図",
+        "土木・道路・造成図"
+      ],
+      "required_inputs": [
+        "sheet_text",
+        "sheet_image",
+        "titleblock_meta"
+      ],
+      "outputs": [
+        "sheet_type_id",
+        "discipline"
+      ],
+      "handoff_to": [
+        "SK_OCR_04",
+        "SK_OCR_05"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_04",
+      "skill_name": "単位・縮尺・方位解決",
+      "triggers": [
+        "縮尺読取",
+        "単位判定",
+        "方位判定"
+      ],
+      "description": "単位、縮尺、方位、視点方向を固定する。",
+      "prompt_refs": [
+        "PRM_004"
+      ],
+      "knowledge_categories": [
+        "単位・縮尺・方位"
+      ],
+      "required_inputs": [
+        "sheet_type",
+        "titleblock_meta",
+        "dimension_samples"
+      ],
+      "outputs": [
+        "length_unit",
+        "sheet_scale_ratio",
+        "view_direction"
+      ],
+      "handoff_to": [
+        "SK_OCR_05",
+        "SK_OCR_06",
+        "SK_OCR_07",
+        "SK_OCR_08",
+        "SK_OCR_09",
+        "SK_OCR_10"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_05",
+      "skill_name": "凡例・略号・材料辞書解決",
+      "triggers": [
+        "凡例",
+        "略号",
+        "材料コード"
+      ],
+      "description": "凡例優先で記号・略号・材料コードを正規化する。",
+      "prompt_refs": [
+        "PRM_005"
+      ],
+      "knowledge_categories": [
+        "凡例・略号・材料辞書"
+      ],
+      "required_inputs": [
+        "legend_region",
+        "ocr_blocks"
+      ],
+      "outputs": [
+        "legend_dictionary",
+        "normalized_terms",
+        "unknown_terms"
+      ],
+      "handoff_to": [
+        "SK_OCR_06",
+        "SK_OCR_07",
+        "SK_OCR_08",
+        "SK_OCR_09",
+        "SK_OCR_10"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_06",
+      "skill_name": "建築一般図抽出",
+      "triggers": [
+        "建築平面図",
+        "立面図",
+        "断面図",
+        "建具表",
+        "仕上表"
+      ],
+      "description": "室・壁・建具・仕上を抽出する。",
+      "prompt_refs": [
+        "PRM_006"
+      ],
+      "knowledge_categories": [
+        "建築図"
+      ],
+      "required_inputs": [
+        "sheet_image",
+        "ocr_blocks",
+        "legend_dictionary",
+        "resolved_units"
+      ],
+      "outputs": [
+        "rooms",
+        "walls",
+        "doors",
+        "windows",
+        "finish_tags"
+      ],
+      "handoff_to": [
+        "SK_OCR_11",
+        "SK_OCR_12",
+        "SK_OCR_14"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_07",
+      "skill_name": "構造図抽出",
+      "triggers": [
+        "構造図",
+        "配筋図",
+        "鉄骨図"
+      ],
+      "description": "基礎、杭、部材、配筋、接合、貫通制約を抽出する。",
+      "prompt_refs": [
+        "PRM_007"
+      ],
+      "knowledge_categories": [
+        "構造図"
+      ],
+      "required_inputs": [
+        "sheet_image",
+        "ocr_blocks",
+        "legend_dictionary",
+        "resolved_units"
+      ],
+      "outputs": [
+        "foundations",
+        "piles",
+        "struct_members",
+        "rebar_specs",
+        "constraints"
+      ],
+      "handoff_to": [
+        "SK_OCR_11",
+        "SK_OCR_12",
+        "SK_OCR_14"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_08",
+      "skill_name": "電気設備図抽出",
+      "triggers": [
+        "電灯図",
+        "動力図",
+        "単線図",
+        "火報図"
+      ],
+      "description": "器具、盤、回路、弱電、外灯を抽出する。",
+      "prompt_refs": [
+        "PRM_008"
+      ],
+      "knowledge_categories": [
+        "電気設備図"
+      ],
+      "required_inputs": [
+        "sheet_image",
+        "ocr_blocks",
+        "legend_dictionary",
+        "resolved_units"
+      ],
+      "outputs": [
+        "fixtures",
+        "panels",
+        "circuits",
+        "site_electrical"
+      ],
+      "handoff_to": [
+        "SK_OCR_11",
+        "SK_OCR_12",
+        "SK_OCR_14"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_09",
+      "skill_name": "機械設備図抽出",
+      "triggers": [
+        "空調図",
+        "換気図",
+        "給排水図",
+        "衛生器具図",
+        "系統図"
+      ],
+      "description": "機器、配管、ダクト、バルブ、器具を抽出する。",
+      "prompt_refs": [
+        "PRM_009"
+      ],
+      "knowledge_categories": [
+        "機械設備図"
+      ],
+      "required_inputs": [
+        "sheet_image",
+        "ocr_blocks",
+        "legend_dictionary",
+        "resolved_units"
+      ],
+      "outputs": [
+        "equipment",
+        "pipes",
+        "ducts",
+        "valves",
+        "fixtures"
+      ],
+      "handoff_to": [
+        "SK_OCR_11",
+        "SK_OCR_12",
+        "SK_OCR_14"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_10",
+      "skill_name": "土木・道路・造成図抽出",
+      "triggers": [
+        "道路平面図",
+        "縦断面図",
+        "横断面図",
+        "排水施設図",
+        "舗装構成図"
+      ],
+      "description": "線形、縦断、横断、排水、舗装、造成要素を抽出する。",
+      "prompt_refs": [
+        "PRM_010"
+      ],
+      "knowledge_categories": [
+        "土木・道路・造成図"
+      ],
+      "required_inputs": [
+        "sheet_image",
+        "ocr_blocks",
+        "legend_dictionary",
+        "resolved_units"
+      ],
+      "outputs": [
+        "alignment",
+        "profile_rows",
+        "cross_sections",
+        "drainage",
+        "pavement_layers",
+        "earthwork"
+      ],
+      "handoff_to": [
+        "SK_OCR_11",
+        "SK_OCR_12",
+        "SK_OCR_14"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_11",
+      "skill_name": "改修・仮設解決",
+      "triggers": [
+        "改修図",
+        "撤去図",
+        "仮設計画図"
+      ],
+      "description": "既存/撤去/新設/復旧と施工制約を識別する。",
+      "prompt_refs": [
+        "PRM_011"
+      ],
+      "knowledge_categories": [
+        "改修・仮設"
+      ],
+      "required_inputs": [
+        "sheet_image",
+        "ocr_blocks",
+        "legend_dictionary",
+        "sheet_type"
+      ],
+      "outputs": [
+        "state_rules",
+        "temporary_constraints",
+        "existing_links"
+      ],
+      "handoff_to": [
+        "SK_OCR_12",
+        "SK_OCR_15"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_12",
+      "skill_name": "図面間リンク・統合",
+      "triggers": [
+        "図面統合",
+        "通り芯リンク",
+        "系統リンク"
+      ],
+      "description": "複数図面を通り芯・室・符号・系統で統合する。",
+      "prompt_refs": [
+        "PRM_012"
+      ],
+      "knowledge_categories": [
+        "図面間整合"
+      ],
+      "required_inputs": [
+        "sheet_outputs",
+        "drawing_index",
+        "building_context"
+      ],
+      "outputs": [
+        "space_keys",
+        "entity_links",
+        "system_graph",
+        "conflicts"
+      ],
+      "handoff_to": [
+        "SK_OCR_13",
+        "SK_OCR_14",
+        "SK_OCR_15"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_13",
+      "skill_name": "仕様優先順位解決",
+      "triggers": [
+        "特記優先",
+        "図面矛盾解決"
+      ],
+      "description": "図面・特記・標準仕様の優先順位で矛盾を解く。",
+      "prompt_refs": [
+        "PRM_013"
+      ],
+      "knowledge_categories": [
+        "仕様・優先順位"
+      ],
+      "required_inputs": [
+        "drawing_notes",
+        "spec_notes",
+        "document_priority_context",
+        "conflicts"
+      ],
+      "outputs": [
+        "resolved_specs",
+        "unresolved_specs"
+      ],
+      "handoff_to": [
+        "SK_OCR_14",
+        "SK_OCR_15"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_14",
+      "skill_name": "数量拾いマッピング",
+      "triggers": [
+        "数量拾い",
+        "材料拾い",
+        "積算連携"
+      ],
+      "description": "抽出済み情報を数量拾い・材料拾いの項目へ変換する。",
+      "prompt_refs": [
+        "PRM_014"
+      ],
+      "knowledge_categories": [
+        "建築図",
+        "構造図",
+        "電気設備図",
+        "機械設備図",
+        "土木・道路・造成図"
+      ],
+      "required_inputs": [
+        "linked_entities",
+        "resolved_units",
+        "project_trade"
+      ],
+      "outputs": [
+        "quantity_items",
+        "missing_measurements"
+      ],
+      "handoff_to": [
+        "SK_OCR_15"
+      ],
+      "enabled": true
+    },
+    {
+      "skill_id": "SK_OCR_15",
+      "skill_name": "QA・例外処理",
+      "triggers": [
+        "図面OCR QA",
+        "矛盾確認",
+        "レビュー"
+      ],
+      "description": "低信頼・未知語・矛盾・必須不足をレビューキューへ整理する。",
+      "prompt_refs": [
+        "PRM_015"
+      ],
+      "knowledge_categories": [
+        "QA・例外処理"
+      ],
+      "required_inputs": [
+        "all_outputs",
+        "confidence_scores",
+        "unknown_terms",
+        "conflicts"
+      ],
+      "outputs": [
+        "review_queue",
+        "acceptance_status"
+      ],
+      "handoff_to": [],
+      "enabled": true
+    }
+  ],
+  "review_queues": [
+    "ocr_router_review",
+    "titleblock_review",
+    "sheet_classification_review",
+    "unit_scale_review",
+    "legend_review",
+    "arch_entity_review",
+    "struct_review",
+    "elec_review",
+    "mech_review",
+    "civil_review",
+    "renovation_review",
+    "cross_sheet_review",
+    "spec_review",
+    "quantity_mapping_review",
+    "final_qa_review"
+  ],
+  "notes": [
+    "OCR単独ではなく、図面文法・凡例・略号辞書・図面間整合を含む構成。",
+    "数量拾いは推定禁止。根拠のある寸法・注記・表からのみ生成。",
+    "未知記号・低信頼項目は review_queue に送る。"
+  ]
+}

@@ -60,6 +60,70 @@ export interface WorkTypeCandidate {
   requiresReview: boolean;
 }
 
+export type OcrReviewQueueSeverity = 'info' | 'warning' | 'critical';
+
+export interface OcrReviewQueueItem {
+  id: string;
+  queue: string;
+  severity: OcrReviewQueueSeverity;
+  title: string;
+  detail: string;
+  sourceText?: string;
+  sourcePage?: number;
+  fieldName?: string;
+}
+
+export interface DrawingMediaRoute {
+  sourceMediaType: 'cad' | 'ifc' | 'vector_pdf' | 'raster_pdf' | 'image' | 'unknown';
+  preferredPipeline: 'direct_text' | 'vector_parse' | 'ocr_cv' | 'manual_review';
+  pageRotationDeg: 0 | 90 | 180 | 270;
+  sheetSplitRequired: boolean;
+  preprocessFlags: string[];
+  confidence: number;
+}
+
+export interface DrawingTitleBlockMeta {
+  drawingNo: string | null;
+  drawingTitle: string | null;
+  sheetScale: string | null;
+  revision: string | null;
+  projectName: string | null;
+  buildingName: string | null;
+  zoneName: string | null;
+  discipline: 'common' | 'architectural' | 'structural' | 'electrical' | 'mechanical' | 'civil' | 'unknown';
+  confidence: number;
+}
+
+export interface DrawingSheetClassification {
+  sheetTypeId: string;
+  sheetTypeName: string;
+  discipline: string;
+  classificationReasons: string[];
+  confidence: number;
+}
+
+export interface DrawingResolvedUnits {
+  lengthUnit: 'mm' | 'm' | 'unknown';
+  elevationUnit: 'mm' | 'm' | 'unknown';
+  sheetScaleRatio: number | null;
+  viewDirection: 'top_down' | 'bottom_up' | 'elevation' | 'sectional' | 'profile' | 'cross_section' | 'unknown';
+  readingOrder: 'left_to_right' | 'top_to_bottom' | 'custom';
+}
+
+export interface DrawingLegendResolution {
+  legendDictionary: Array<{
+    raw: string;
+    canonical: string;
+    domain: string;
+  }>;
+  normalizedTerms: Array<{
+    raw: string;
+    canonical: string;
+    type: 'abbr' | 'material' | 'finish' | 'symbol';
+  }>;
+  unknownTerms: string[];
+}
+
 export interface PriceMasterItem {
   id: string;
   masterType: MasterType;
@@ -143,6 +207,12 @@ export interface Drawing {
   ocrItems: OcrItem[];
   aiCandidates: AICandidate[];
   workTypeCandidates: WorkTypeCandidate[];
+  mediaRoute?: DrawingMediaRoute;
+  titleBlockMeta?: DrawingTitleBlockMeta;
+  sheetClassification?: DrawingSheetClassification;
+  resolvedUnits?: DrawingResolvedUnits;
+  legendResolution?: DrawingLegendResolution;
+  reviewQueue: OcrReviewQueueItem[];
   uploadedAt: string;
   lastParsedAt?: string;
   lastError?: string;
@@ -338,6 +408,20 @@ export interface ParseDrawingResponse {
     sourceTexts: string[];
     requiresReview: boolean;
   }>;
+  mediaRoute?: DrawingMediaRoute;
+  titleBlock?: DrawingTitleBlockMeta;
+  sheetClassification?: DrawingSheetClassification;
+  resolvedUnits?: DrawingResolvedUnits;
+  legendResolution?: DrawingLegendResolution;
+  reviewQueue?: Array<{
+    queue: string;
+    severity: OcrReviewQueueSeverity;
+    title: string;
+    detail: string;
+    sourceText?: string;
+    sourcePage?: number;
+    fieldName?: string;
+  }>;
   ocrLines: string[];
   ocrItems: Array<{
     text: string;
@@ -424,6 +508,7 @@ export function createDefaultDrawing(projectId: string, name: string = '図面�
     ocrItems: [],
     aiCandidates: [],
     workTypeCandidates: [],
+    reviewQueue: [],
     uploadedAt: new Date().toISOString(),
   };
 }

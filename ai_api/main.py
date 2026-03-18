@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import uuid
@@ -13,7 +14,7 @@ import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageStat
 
 try:
     from rapidocr import RapidOCR
@@ -28,6 +29,47 @@ PREVIEW_DIR = STORAGE_DIR / "previews"
 PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 PRODUCT_MASTER_SOURCE = BASE_DIR.parent / "client" / "src" / "lib" / "priceData.ts"
 OCR_REVIEW_SCORE_THRESHOLD = 0.75
+
+
+PACK_DIR_CANDIDATES = [
+    BASE_DIR / "data" / "drawing-ocr-pack",
+    BASE_DIR.parent / "server" / "data" / "drawing-ocr-pack",
+]
+
+
+def resolve_pack_dir() -> Path | None:
+    for candidate in PACK_DIR_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+OCR_PACK_DIR = resolve_pack_dir()
+
+
+def load_pack_json(name: str, default: Any) -> Any:
+    if OCR_PACK_DIR is None:
+        return default
+    path = OCR_PACK_DIR / name
+    if not path.exists():
+        return default
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+SHEET_TYPE_MASTER = load_pack_json("sheet_type_master.json", [])
+ABBREVIATION_MASTER = load_pack_json("abbreviation_master.json", [])
+SYMBOL_SEED_MASTER = load_pack_json("symbol_seed_master.json", [])
+KNOWLEDGE_MASTER = load_pack_json("knowledge_master.json", [])
+PROMPT_DEFINITIONS = load_pack_json("prompt_definitions.json", {"prompts": []})
+SKILL_PACK = load_pack_json("skill_pack.json", {"review_queues": []})
+
+KNOWN_REVIEW_QUEUES = set(SKILL_PACK.get("review_queues", []))
+ABBREVIATION_INDEX = {
+    str(row.get("abbreviation", "")).upper(): row
+    for row in ABBREVIATION_MASTER
+    if str(row.get("abbreviation", "")).strip()
+}
+SHEET_TYPE_ROWS = [row for row in SHEET_TYPE_MASTER if isinstance(row, dict)]
 
 
 def parse_cors_origins() -> tuple[list[str], str | None]:
@@ -48,7 +90,7 @@ def parse_cors_origins() -> tuple[list[str], str | None]:
 
 cors_origins, cors_origin_regex = parse_cors_origins()
 
-app = FastAPI(title="my-estimator OCR API", version="0.1.0")
+app = FastAPI(title="my-estimator OCR API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -125,6 +167,10 @@ def normalize_product_key(text: str) -> str:
     normalized = normalize_text(text).upper()
     normalized = normalized.replace("NO.", "NO").replace("№", "NO").replace("φ", "")
     return re.sub(r"[\s\-_=:：/.,・()（）\[\]{}]+", "", normalized)
+
+
+def normalize_token(text: str) -> str:
+    return re.sub(r"\s+", "", normalize_text(text)).upper()
 
 
 def is_dimension_like_text(text: str) -> bool:
@@ -213,37 +259,19 @@ def match_secondary_product(source_text: str) -> tuple[str | None, float, bool]:
     return best_name, best_score, is_ambiguous
 
 
-def classify_work_types(ocr_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    scored: list[dict[str, Any]] = []
-    searchable_texts = [normalize_text(item["text"]) for item in ocr_items]
-
-    for block_type, (keywords, label) in WORK_TYPE_PATTERNS.items():
-        matched_texts: list[str] = []
-        match_score = 0.0
-        for item, normalized in zip(ocr_items, searchable_texts):
-            item_matches = [keyword for keyword in keywords if keyword.lower() in normalized.lower()]
-            if item_matches:
-                matched_texts.append(item["text"])
-                match_score += max(0.35, min(item["score"], 1.0))
-
-        if not matched_texts:
-            continue
-
-        confidence = min(0.98, 0.45 + (match_score / max(len(keywords), 1)) * 0.5)
-        scored.append({
-            "blockType": block_type,
-            "label": label,
-            "confidence": round(confidence, 4),
-            "reason": f"キーワード一致: {', '.join(matched_texts[:3])}",
-            "sourceTexts": matched_texts[:5],
-            "requiresReview": False,
-        })
-
-    scored.sort(key=lambda item: item["confidence"], reverse=True)
-    if len(scored) > 1 and scored[0]["confidence"] - scored[1]["confidence"] < 0.12:
-        scored[0]["requiresReview"] = True
-        scored[1]["requiresReview"] = True
-    return scored
+def choose_candidate(existing: dict[str, Any] | None, candidate: dict[str, Any]) -> dict[str, Any]:
+    if not existing:
+        return candidate
+    if existing.get("value") != candidate.get("value"):
+        winner = candidate if candidate["confidence"] >= existing["confidence"] else existing
+        winner = dict(winner)
+        winner["requiresReview"] = True
+        winner["reason"] = f"候補衝突あり: {existing.get('sourceText')} / {candidate.get('sourceText')}"
+        winner["confidence"] = min(existing["confidence"], candidate["confidence"])
+        return winner
+    if candidate["confidence"] > existing["confidence"]:
+        return candidate
+    return existing
 
 
 def build_candidate(field_name: str, source_text: str, source_page: int, source_box: list[float], value: str | float, reason: str, confidence: float, requires_review: bool) -> dict[str, Any]:
@@ -267,19 +295,564 @@ def build_candidate(field_name: str, source_text: str, source_page: int, source_
     return payload
 
 
-def choose_candidate(existing: dict[str, Any] | None, candidate: dict[str, Any]) -> dict[str, Any]:
-    if not existing:
-        return candidate
-    if existing.get("value") != candidate.get("value"):
-        winner = candidate if candidate["confidence"] >= existing["confidence"] else existing
-        winner = dict(winner)
-        winner["requiresReview"] = True
-        winner["reason"] = f"候補衝突あり: {existing.get('sourceText')} / {candidate.get('sourceText')}"
-        winner["confidence"] = min(existing["confidence"], candidate["confidence"])
-        return winner
-    if candidate["confidence"] > existing["confidence"]:
-        return candidate
-    return existing
+def classify_work_types(ocr_items: list[dict[str, Any]], drawing_discipline: str | None = None) -> list[dict[str, Any]]:
+    scored: list[dict[str, Any]] = []
+    searchable_texts = [normalize_text(item["text"]) for item in ocr_items]
+
+    for block_type, (keywords, label) in WORK_TYPE_PATTERNS.items():
+        matched_texts: list[str] = []
+        match_score = 0.0
+        for item, normalized in zip(ocr_items, searchable_texts):
+            item_matches = [keyword for keyword in keywords if keyword.lower() in normalized.lower()]
+            if item_matches:
+                matched_texts.append(item["text"])
+                match_score += max(0.35, min(item["score"], 1.0))
+
+        if not matched_texts:
+            continue
+
+        confidence = min(0.98, 0.45 + (match_score / max(len(keywords), 1)) * 0.5)
+        requires_review = False
+        if drawing_discipline and drawing_discipline not in {"civil", "共通", "common", "unknown"}:
+            confidence = min(confidence, 0.72)
+            requires_review = True
+
+        scored.append({
+            "blockType": block_type,
+            "label": label,
+            "confidence": round(confidence, 4),
+            "reason": f"キーワード一致: {', '.join(matched_texts[:3])}",
+            "sourceTexts": matched_texts[:5],
+            "requiresReview": requires_review,
+        })
+
+    scored.sort(key=lambda item: item["confidence"], reverse=True)
+    if len(scored) > 1 and scored[0]["confidence"] - scored[1]["confidence"] < 0.12:
+        scored[0]["requiresReview"] = True
+        scored[1]["requiresReview"] = True
+    return scored
+
+
+def page_box_to_flat(x0: float, y0: float, x1: float, y1: float) -> list[float]:
+    return [float(x0), float(y0), float(x1), float(y0), float(x1), float(y1), float(x0), float(y1)]
+
+
+def extract_pdf_text_probe(file_bytes: bytes) -> dict[str, Any]:
+    document = fitz.open(stream=file_bytes, filetype="pdf")
+    text_word_count = 0
+    for page in document:
+        words = page.get_text("words")
+        text_word_count += len(words)
+    page_count = max(len(document), 1)
+    return {
+        "has_text_layer": text_word_count > 0,
+        "text_word_count": text_word_count,
+        "avg_words_per_page": round(text_word_count / page_count, 2),
+    }
+
+
+def extract_pdf_vector_probe(file_bytes: bytes) -> dict[str, Any]:
+    document = fitz.open(stream=file_bytes, filetype="pdf")
+    drawing_count = 0
+    for page in document:
+        try:
+            drawing_count += len(page.get_drawings())
+        except Exception:
+            continue
+    page_count = max(len(document), 1)
+    return {
+        "drawing_count": drawing_count,
+        "avg_drawings_per_page": round(drawing_count / page_count, 2),
+    }
+
+
+def extract_pdf_text_items(file_bytes: bytes) -> list[dict[str, Any]]:
+    document = fitz.open(stream=file_bytes, filetype="pdf")
+    items: list[dict[str, Any]] = []
+    for page_index, page in enumerate(document, start=1):
+        words = page.get_text("words")
+        for word in words:
+            if len(word) < 5:
+                continue
+            x0, y0, x1, y1, text, *_rest = word
+            text = str(text).strip()
+            if not text:
+                continue
+            items.append({
+                "text": text,
+                "score": 0.99,
+                "box": page_box_to_flat(x0, y0, x1, y1),
+                "page": page_index,
+            })
+    return items
+
+
+def estimate_preprocess_flags(image: Image.Image) -> list[str]:
+    flags: list[str] = []
+    grayscale = image.convert("L")
+    stat = ImageStat.Stat(grayscale)
+    contrast = stat.stddev[0] if stat.stddev else 0.0
+    if contrast < 40:
+        flags.append("contrast_boost")
+    if image.width < 1400 or image.height < 900:
+        flags.append("binarize")
+    return flags
+
+
+def determine_media_route(file_name: str, file_type: str, file_bytes: bytes, page_images: list[Image.Image]) -> dict[str, Any]:
+    lowered_name = file_name.lower()
+    if lowered_name.endswith(".ifc"):
+        return {
+            "sourceMediaType": "ifc",
+            "preferredPipeline": "manual_review",
+            "pageRotationDeg": 0,
+            "sheetSplitRequired": False,
+            "preprocessFlags": [],
+            "confidence": 0.95,
+        }
+    if lowered_name.endswith((".dwg", ".dxf", ".jww", ".jwc")):
+        return {
+            "sourceMediaType": "cad",
+            "preferredPipeline": "manual_review",
+            "pageRotationDeg": 0,
+            "sheetSplitRequired": False,
+            "preprocessFlags": [],
+            "confidence": 0.95,
+        }
+
+    preprocess_flags: list[str] = []
+    for page_image in page_images[:2]:
+        preprocess_flags.extend(estimate_preprocess_flags(page_image))
+    preprocess_flags = list(dict.fromkeys(preprocess_flags))
+
+    if file_type == "pdf":
+        text_probe = extract_pdf_text_probe(file_bytes)
+        vector_probe = extract_pdf_vector_probe(file_bytes)
+        has_text = bool(text_probe["has_text_layer"])
+        avg_words = float(text_probe["avg_words_per_page"])
+        avg_drawings = float(vector_probe["avg_drawings_per_page"])
+
+        if has_text and avg_words >= 12:
+            return {
+                "sourceMediaType": "vector_pdf",
+                "preferredPipeline": "direct_text",
+                "pageRotationDeg": 0,
+                "sheetSplitRequired": False,
+                "preprocessFlags": preprocess_flags,
+                "confidence": 0.95,
+            }
+        if avg_drawings >= 10:
+            return {
+                "sourceMediaType": "vector_pdf",
+                "preferredPipeline": "ocr_cv",
+                "pageRotationDeg": 0,
+                "sheetSplitRequired": False,
+                "preprocessFlags": preprocess_flags,
+                "confidence": 0.78,
+            }
+        return {
+            "sourceMediaType": "raster_pdf",
+            "preferredPipeline": "ocr_cv",
+            "pageRotationDeg": 0,
+            "sheetSplitRequired": False,
+            "preprocessFlags": preprocess_flags,
+            "confidence": 0.88,
+        }
+
+    return {
+        "sourceMediaType": "image",
+        "preferredPipeline": "ocr_cv",
+        "pageRotationDeg": 0,
+        "sheetSplitRequired": False,
+        "preprocessFlags": preprocess_flags,
+        "confidence": 0.9,
+    }
+
+
+def render_pdf_pages(file_bytes: bytes) -> list[Image.Image]:
+    document = fitz.open(stream=file_bytes, filetype="pdf")
+    pages: list[Image.Image] = []
+    for page in document:
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+        pages.append(Image.open(io.BytesIO(pixmap.tobytes("png"))).convert("RGB"))
+    return pages
+
+
+def load_image_pages(file_bytes: bytes) -> list[Image.Image]:
+    image = Image.open(io.BytesIO(file_bytes))
+    return [ImageOps.exif_transpose(image).convert("RGB")]
+
+
+def run_ocr_on_page(image: Image.Image, page_no: int) -> list[dict[str, Any]]:
+    raw_result = ocr_engine(np.array(image.convert("RGB")))
+    items: list[dict[str, Any]] = []
+
+    if hasattr(raw_result, "boxes") and hasattr(raw_result, "txts"):
+        boxes_attr = getattr(raw_result, "boxes", None)
+        texts_attr = getattr(raw_result, "txts", None)
+        scores_attr = getattr(raw_result, "scores", None)
+        boxes = list(boxes_attr) if boxes_attr is not None else []
+        texts = list(texts_attr) if texts_attr is not None else []
+        scores = list(scores_attr) if scores_attr is not None else []
+        entries = zip(boxes, texts, scores)
+    elif isinstance(raw_result, tuple) and raw_result:
+        legacy_entries = raw_result[0]
+        entries = legacy_entries or []
+    else:
+        entries = []
+
+    for entry in entries:
+        if isinstance(entry, tuple) and len(entry) == 3 and not hasattr(raw_result, "boxes"):
+            box_data, text_data, score_data = entry
+        else:
+            try:
+                box_data, text_data, score_data = entry
+            except (TypeError, ValueError):
+                continue
+        try:
+            box = flatten_box(box_data)
+        except ValueError:
+            continue
+        text = str(text_data).strip()
+        if not text:
+            continue
+        score = float(score_data) if score_data is not None else 0.0
+        items.append({
+            "text": text,
+            "score": round(score, 4),
+            "box": box,
+            "page": page_no,
+        })
+    return items
+
+
+def save_preview_image(image: Image.Image) -> str:
+    file_name = f"{uuid.uuid4().hex}.png"
+    file_path = PREVIEW_DIR / file_name
+    image.save(file_path, format="PNG")
+    return file_name
+
+
+def build_image_url(request: Request, relative_path: str) -> str:
+    return f"{str(request.base_url).rstrip('/')}/files/{relative_path}"
+
+
+def page_items(ocr_items: list[dict[str, Any]], page_no: int) -> list[dict[str, Any]]:
+    return [item for item in ocr_items if item["page"] == page_no]
+
+
+def select_titleblock_texts(ocr_items: list[dict[str, Any]], page_preview: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not page_preview:
+        return page_items(ocr_items, 1)
+    width = float(page_preview["width"])
+    height = float(page_preview["height"])
+    candidates = []
+    for item in page_items(ocr_items, 1):
+        xs = [item["box"][0], item["box"][2], item["box"][4], item["box"][6]]
+        ys = [item["box"][1], item["box"][3], item["box"][5], item["box"][7]]
+        cx = sum(xs) / 4
+        cy = sum(ys) / 4
+        if cx >= width * 0.55 or cy >= height * 0.72:
+            candidates.append(item)
+    return candidates or page_items(ocr_items, 1)
+
+
+def find_first_pattern(texts: list[str], patterns: list[str]) -> str | None:
+    for text in texts:
+        normalized = normalize_text(text)
+        for pattern in patterns:
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip() if match.groups() else match.group(0).strip()
+    return None
+
+
+def infer_discipline(texts: list[str]) -> str:
+    joined = "\n".join(texts)
+    if re.search(r"道路|造成|排水|擁壁|測点|縦断|横断|舗装|法面", joined):
+        return "civil"
+    if re.search(r"配筋|柱|梁|杭|基礎配筋|鉄骨", joined):
+        return "structural"
+    if re.search(r"照明|動力|単線|火報|弱電|コンセント|分電盤", joined):
+        return "electrical"
+    if re.search(r"空調|換気|給排水|衛生|ダクト|配管|消火", joined):
+        return "mechanical"
+    if re.search(r"平面図|立面図|断面図|配置図|建具表|仕上表|天井伏図", joined):
+        return "architectural"
+    return "unknown"
+
+
+def extract_titleblock_meta(ocr_items: list[dict[str, Any]], page_preview: dict[str, Any] | None) -> dict[str, Any]:
+    texts = [item["text"] for item in select_titleblock_texts(ocr_items, page_preview)]
+    fallback_texts = texts + [item["text"] for item in page_items(ocr_items, 1)]
+    drawing_title = find_first_pattern(fallback_texts, [
+        r"(?:図面名|図\s*名)\s*[=:：]?\s*(.+)$",
+        r"((?:配置図|平面図|立面図|断面図|詳細図|縦断図|横断図|舗装構成図|擁壁詳細図|排水施設図).*)$",
+    ])
+    sheet_scale = find_first_pattern(fallback_texts, [r"(?:縮尺|SCALE|S)\s*[=:：]?\s*(1[:/]\d+)", r"(1[:/]\d+)"])
+    drawing_no = find_first_pattern(fallback_texts, [
+        r"(?:図面番号|図番|DRAWING\s*NO\.?|NO\.)\s*[=:：]?\s*([A-Za-z0-9\-_/]+)",
+        r"\b([A-Za-z]{1,3}[\-_/]?[0-9]{1,4}[A-Za-z0-9\-_/]*)\b",
+    ])
+    revision = find_first_pattern(fallback_texts, [r"(?:改訂|REV\.?|Revision)\s*[=:：]?\s*([A-Za-z0-9\-]+)"])
+    project_name = find_first_pattern(fallback_texts, [r"(?:工事名|案件名|PROJECT)\s*[=:：]?\s*(.+)$"])
+    building_name = find_first_pattern(fallback_texts, [r"(?:棟名|建物名|BUILDING)\s*[=:：]?\s*(.+)$"])
+    zone_name = find_first_pattern(fallback_texts, [r"(?:工区|ゾーン|ZONE)\s*[=:：]?\s*(.+)$"])
+    discipline = infer_discipline(fallback_texts)
+
+    filled = [drawing_no, drawing_title, sheet_scale, project_name, discipline if discipline != "unknown" else None]
+    confidence = round(sum(1 for value in filled if value) / max(len(filled), 1), 4)
+
+    return {
+        "drawingNo": drawing_no,
+        "drawingTitle": drawing_title,
+        "sheetScale": sheet_scale,
+        "revision": revision,
+        "projectName": project_name,
+        "buildingName": building_name,
+        "zoneName": zone_name,
+        "discipline": discipline,
+        "confidence": confidence,
+    }
+
+
+def classify_sheet_type(ocr_items: list[dict[str, Any]], titleblock_meta: dict[str, Any]) -> dict[str, Any]:
+    title = normalize_text(titleblock_meta.get("drawingTitle") or "")
+    discipline_hint = titleblock_meta.get("discipline") or "unknown"
+    searchable = "\n".join(normalize_text(item["text"]) for item in page_items(ocr_items, 1))
+
+    best_row: dict[str, Any] | None = None
+    best_score = 0.0
+    best_reasons: list[str] = []
+
+    for row in SHEET_TYPE_ROWS:
+        sheet_type_name = str(row.get("sheet_type_name", ""))
+        canonical_key = str(row.get("canonical_key", ""))
+        row_discipline = str(row.get("discipline", ""))
+        keywords = row.get("keywords_json", []) or []
+        score = 0.0
+        reasons: list[str] = []
+
+        if sheet_type_name and sheet_type_name in title:
+            score += 0.65
+            reasons.append(f"図面名一致: {sheet_type_name}")
+        if canonical_key and canonical_key in searchable.lower():
+            score += 0.15
+            reasons.append(f"正規キー一致: {canonical_key}")
+        for keyword in keywords:
+            if isinstance(keyword, str) and keyword and keyword in searchable:
+                score += 0.08
+                reasons.append(f"キーワード一致: {keyword}")
+
+        if discipline_hint != "unknown":
+            discipline_match = (
+                (discipline_hint == "civil" and row_discipline == "土木")
+                or (discipline_hint == "architectural" and row_discipline == "建築")
+                or (discipline_hint == "structural" and row_discipline == "構造")
+                or (discipline_hint == "electrical" and row_discipline == "電気")
+                or (discipline_hint == "mechanical" and row_discipline == "機械")
+                or row_discipline == "共通"
+            )
+            if discipline_match:
+                score += 0.1
+
+        if score > best_score:
+            best_score = score
+            best_row = row
+            best_reasons = reasons[:4]
+
+    if not best_row:
+        return {
+            "sheetTypeId": "unknown",
+            "sheetTypeName": "未分類",
+            "discipline": discipline_hint,
+            "classificationReasons": ["分類ルールに一致するシート種別がありません"],
+            "confidence": 0.0,
+        }
+
+    return {
+        "sheetTypeId": best_row.get("sheet_type_id", "unknown"),
+        "sheetTypeName": best_row.get("sheet_type_name", "未分類"),
+        "discipline": best_row.get("discipline", discipline_hint),
+        "classificationReasons": best_reasons or ["キーワード一致"],
+        "confidence": round(min(best_score, 0.98), 4),
+    }
+
+
+def parse_scale_ratio(scale_text: str | None) -> int | None:
+    if not scale_text:
+        return None
+    match = re.search(r"1[:/](\d+)", scale_text)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def resolve_units_and_view(titleblock_meta: dict[str, Any], sheet_classification: dict[str, Any]) -> dict[str, Any]:
+    discipline = str(sheet_classification.get("discipline") or titleblock_meta.get("discipline") or "unknown")
+    sheet_type_name = normalize_text(str(sheet_classification.get("sheetTypeName") or ""))
+    if discipline in {"土木", "civil"}:
+        length_unit = "m"
+        elevation_unit = "m"
+    else:
+        length_unit = "mm"
+        elevation_unit = "mm"
+
+    view_direction = "unknown"
+    if "天井伏図" in sheet_type_name:
+        view_direction = "bottom_up"
+    elif any(token in sheet_type_name for token in ["平面図", "配置図", "基礎伏図"]):
+        view_direction = "top_down"
+    elif any(token in sheet_type_name for token in ["立面図"]):
+        view_direction = "elevation"
+    elif any(token in sheet_type_name for token in ["断面図", "縦断図"]):
+        view_direction = "sectional"
+    elif any(token in sheet_type_name for token in ["横断"]):
+        view_direction = "cross_section"
+
+    return {
+        "lengthUnit": length_unit,
+        "elevationUnit": elevation_unit,
+        "sheetScaleRatio": parse_scale_ratio(titleblock_meta.get("sheetScale")),
+        "viewDirection": view_direction,
+        "readingOrder": "left_to_right",
+    }
+
+
+def resolve_legend_and_abbreviations(ocr_items: list[dict[str, Any]]) -> dict[str, Any]:
+    legend_dictionary: list[dict[str, Any]] = []
+    normalized_terms: list[dict[str, Any]] = []
+    unknown_terms: list[str] = []
+    seen_normalized: set[tuple[str, str, str]] = set()
+    seen_unknown: set[str] = set()
+
+    for item in ocr_items:
+        text = normalize_text(item["text"])
+        if not text:
+            continue
+
+        legend_match = re.match(r"([^=:：]{1,20})\s*[:=：]\s*(.{1,40})$", text)
+        if legend_match:
+            raw = legend_match.group(1).strip()
+            canonical = legend_match.group(2).strip()
+            legend_dictionary.append({"raw": raw, "canonical": canonical, "domain": "sheet_legend"})
+
+        tokens = re.findall(r"[A-Za-z]{1,6}[\-]?[A-Za-z0-9]{0,6}", text)
+        for token in tokens:
+            token_key = normalize_token(token)
+            row = ABBREVIATION_INDEX.get(token_key)
+            if row:
+                key = (token, str(row.get("canonical_label", "")), "abbr")
+                if key not in seen_normalized:
+                    seen_normalized.add(key)
+                    normalized_terms.append({
+                        "raw": token,
+                        "canonical": row.get("canonical_label", token),
+                        "type": "abbr",
+                    })
+            elif token_key and len(token_key) <= 6 and token_key not in seen_unknown:
+                seen_unknown.add(token_key)
+                unknown_terms.append(token)
+
+    return {
+        "legendDictionary": legend_dictionary[:20],
+        "normalizedTerms": normalized_terms[:40],
+        "unknownTerms": unknown_terms[:20],
+    }
+
+
+def build_review_item(queue: str, severity: str, title: str, detail: str, source_text: str | None = None, source_page: int | None = None, field_name: str | None = None) -> dict[str, Any]:
+    queue_name = queue if queue in KNOWN_REVIEW_QUEUES else queue
+    payload = {
+        "queue": queue_name,
+        "severity": severity,
+        "title": title,
+        "detail": detail,
+    }
+    if source_text:
+        payload["sourceText"] = source_text
+    if source_page is not None:
+        payload["sourcePage"] = source_page
+    if field_name:
+        payload["fieldName"] = field_name
+    return payload
+
+
+def build_review_queue(
+    media_route: dict[str, Any],
+    titleblock_meta: dict[str, Any],
+    sheet_classification: dict[str, Any],
+    resolved_units: dict[str, Any],
+    legend_resolution: dict[str, Any],
+    work_type_candidates: list[dict[str, Any]],
+    ocr_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    review_queue: list[dict[str, Any]] = []
+
+    if media_route["preferredPipeline"] == "manual_review" or media_route["confidence"] < 0.85:
+        review_queue.append(build_review_item(
+            "ocr_router_review",
+            "warning",
+            "媒体判定を要確認",
+            f"媒体判定の確信度が低いか、直接処理できない媒体です。 route={media_route['preferredPipeline']}",
+        ))
+
+    missing_titleblock_fields = [
+        key for key in ["drawingNo", "drawingTitle", "sheetScale"]
+        if not titleblock_meta.get(key)
+    ]
+    if len(missing_titleblock_fields) >= 2 or titleblock_meta.get("confidence", 0) < 0.75:
+        review_queue.append(build_review_item(
+            "titleblock_review",
+            "critical",
+            "表題欄の主要項目が不足",
+            f"不足項目: {', '.join(missing_titleblock_fields) or '複数項目未確定'}",
+        ))
+
+    if sheet_classification.get("sheetTypeId") == "unknown" or sheet_classification.get("confidence", 0) < 0.75:
+        review_queue.append(build_review_item(
+            "sheet_classification_review",
+            "critical",
+            "シート分類が未確定",
+            "図面種別の特定が弱く、工種別抽出へ進む前に確認が必要です。",
+        ))
+
+    if resolved_units.get("lengthUnit") == "unknown" or resolved_units.get("elevationUnit") == "unknown" or resolved_units.get("sheetScaleRatio") is None:
+        review_queue.append(build_review_item(
+            "unit_scale_review",
+            "warning",
+            "単位または縮尺が未解決",
+            "数量拾いに必要な単位系または縮尺が確定していません。",
+        ))
+
+    if legend_resolution.get("unknownTerms"):
+        review_queue.append(build_review_item(
+            "legend_review",
+            "warning",
+            "未登録の略号または記号があります",
+            f"未解決語: {', '.join(legend_resolution['unknownTerms'][:5])}",
+        ))
+
+    low_confidence_item = next((item for item in ocr_items if item["score"] < OCR_REVIEW_SCORE_THRESHOLD), None)
+    if low_confidence_item:
+        review_queue.append(build_review_item(
+            "ocr_router_review",
+            "warning",
+            "低信頼 OCR 行があります",
+            "重要な項目に低信頼 OCR が含まれている可能性があります。",
+            source_text=low_confidence_item["text"],
+            source_page=low_confidence_item["page"],
+        ))
+
+    if work_type_candidates and work_type_candidates[0].get("requiresReview"):
+        review_queue.append(build_review_item(
+            "sheet_classification_review",
+            "warning",
+            "工種候補が競合しています",
+            work_type_candidates[0].get("reason", "工種候補を確定できません。"),
+        ))
+
+    return review_queue
 
 
 def extract_candidates(ocr_items: list[dict[str, Any]], mode: str) -> dict[str, Any]:
@@ -432,78 +1005,6 @@ def extract_candidates(ocr_items: list[dict[str, Any]], mode: str) -> dict[str, 
     return candidates
 
 
-def pil_to_numpy(image: Image.Image) -> np.ndarray:
-    return np.array(image.convert("RGB"))
-
-
-def render_pdf_pages(file_bytes: bytes) -> list[Image.Image]:
-    document = fitz.open(stream=file_bytes, filetype="pdf")
-    pages: list[Image.Image] = []
-    for page in document:
-        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-        pages.append(Image.open(io.BytesIO(pixmap.tobytes("png"))).convert("RGB"))
-    return pages
-
-
-def load_image_pages(file_bytes: bytes) -> list[Image.Image]:
-    image = Image.open(io.BytesIO(file_bytes))
-    return [ImageOps.exif_transpose(image).convert("RGB")]
-
-
-def run_ocr_on_page(image: Image.Image, page_no: int) -> list[dict[str, Any]]:
-    raw_result = ocr_engine(pil_to_numpy(image))
-    items: list[dict[str, Any]] = []
-
-    if hasattr(raw_result, "boxes") and hasattr(raw_result, "txts"):
-        boxes_attr = getattr(raw_result, "boxes", None)
-        texts_attr = getattr(raw_result, "txts", None)
-        scores_attr = getattr(raw_result, "scores", None)
-        boxes = list(boxes_attr) if boxes_attr is not None else []
-        texts = list(texts_attr) if texts_attr is not None else []
-        scores = list(scores_attr) if scores_attr is not None else []
-        entries = zip(boxes, texts, scores)
-    elif isinstance(raw_result, tuple) and raw_result:
-        legacy_entries = raw_result[0]
-        entries = legacy_entries or []
-    else:
-        entries = []
-
-    for entry in entries:
-        if isinstance(entry, tuple) and len(entry) == 3 and not hasattr(raw_result, "boxes"):
-            box_data, text_data, score_data = entry
-        else:
-            try:
-                box_data, text_data, score_data = entry
-            except (TypeError, ValueError):
-                continue
-        try:
-            box = flatten_box(box_data)
-        except ValueError:
-            continue
-        text = str(text_data).strip()
-        if not text:
-            continue
-        score = float(score_data) if score_data is not None else 0.0
-        items.append({
-            "text": text,
-            "score": round(score, 4),
-            "box": box,
-            "page": page_no,
-        })
-    return items
-
-
-def save_preview_image(image: Image.Image) -> str:
-    file_name = f"{uuid.uuid4().hex}.png"
-    file_path = PREVIEW_DIR / file_name
-    image.save(file_path, format="PNG")
-    return file_name
-
-
-def build_image_url(request: Request, relative_path: str) -> str:
-    return f"{str(request.base_url).rstrip('/')}/files/{relative_path}"
-
-
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"success": True, "status": "ok"}
@@ -511,7 +1012,13 @@ def health() -> dict[str, Any]:
 
 @app.get("/healthz")
 def healthz() -> dict[str, Any]:
-    return {"success": True, "status": "ok"}
+    return {
+        "success": True,
+        "status": "ok",
+        "ocrPackLoaded": OCR_PACK_DIR is not None,
+        "sheetTypeCount": len(SHEET_TYPE_ROWS),
+        "promptCount": len(PROMPT_DEFINITIONS.get("prompts", [])),
+    }
 
 
 @app.post("/api/ocr/parse-drawing")
@@ -539,6 +1046,7 @@ async def parse_drawing(
     except Exception as exc:  # pragma: no cover - depends on user input
         raise HTTPException(status_code=422, detail=f"図面の読み込みに失敗しました: {exc}") from exc
 
+    media_route = determine_media_route(file.filename, file_type, file_bytes, pages)
     all_ocr_items: list[dict[str, Any]] = []
     page_previews: list[dict[str, Any]] = []
 
@@ -550,10 +1058,28 @@ async def parse_drawing(
             "height": page_image.height,
             "page": index,
         })
-        all_ocr_items.extend(run_ocr_on_page(page_image, index))
 
+    if file_type == "pdf" and media_route["preferredPipeline"] == "direct_text":
+        all_ocr_items = extract_pdf_text_items(file_bytes)
+    else:
+        for index, page_image in enumerate(pages, start=1):
+            all_ocr_items.extend(run_ocr_on_page(page_image, index))
+
+    titleblock_meta = extract_titleblock_meta(all_ocr_items, page_previews[0] if page_previews else None)
+    sheet_classification = classify_sheet_type(all_ocr_items, titleblock_meta)
+    resolved_units = resolve_units_and_view(titleblock_meta, sheet_classification)
+    legend_resolution = resolve_legend_and_abbreviations(all_ocr_items)
     ai_candidates = extract_candidates(all_ocr_items, mode)
-    work_type_candidates = classify_work_types(all_ocr_items)
+    work_type_candidates = classify_work_types(all_ocr_items, sheet_classification.get("discipline"))
+    review_queue = build_review_queue(
+        media_route,
+        titleblock_meta,
+        sheet_classification,
+        resolved_units,
+        legend_resolution,
+        work_type_candidates,
+        all_ocr_items,
+    )
 
     return {
         "drawingSource": {
@@ -561,6 +1087,12 @@ async def parse_drawing(
             "fileType": file_type,
             "pageCount": len(pages),
         },
+        "mediaRoute": media_route,
+        "titleBlock": titleblock_meta,
+        "sheetClassification": sheet_classification,
+        "resolvedUnits": resolved_units,
+        "legendResolution": legend_resolution,
+        "reviewQueue": review_queue,
         "aiCandidates": ai_candidates,
         "workTypeCandidates": work_type_candidates,
         "ocrLines": [item["text"] for item in all_ocr_items],
@@ -570,5 +1102,9 @@ async def parse_drawing(
         "debug": {
             "ocr_line_count": len(all_ocr_items),
             "mode": mode,
+            "ocr_pack_loaded": OCR_PACK_DIR is not None,
+            "prompt_count": len(PROMPT_DEFINITIONS.get("prompts", [])),
+            "knowledge_count": len(KNOWLEDGE_MASTER),
+            "symbol_seed_count": len(SYMBOL_SEED_MASTER),
         },
     }

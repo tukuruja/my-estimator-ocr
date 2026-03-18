@@ -11,6 +11,8 @@
 ## 2. 現在の検証範囲
 - 設計思想
 - expert panel
+- knowledge pack selection
+- quantity extraction protocol
 - system prompt
 - JSON schema
 - current project / block から OpenAI request body を生成するところまで
@@ -32,18 +34,22 @@
 
 ### C. 見積反映
 - quantityAdjustments を block へ反映
+- quantityReviewMatrix を reviewIssues と evidenceRows に変換
 - priceAdjustments を evidenceRows と照合
 - blockingQuestions を reviewIssues に変換
+- futureScopeIsolation を future backlog として隔離
 
 ## 4. UI 統合案
 
 ### Home
 - OCR確認画面の下に `AI合意レビュー` を追加
 - current block の `decision` を表示
+- `activatedKnowledgePacks` と `quantityReviewMatrix` の要点を表示
 
 ### EstimateReportPage
 - 帳票生成時に `blockingQuestions` を上段警告として表示
 - `auditTrail` を根拠欄へ表示
+- `futureScopeIsolation` を別セクションで表示
 
 ### PriceTable
 - 採用単価と master 有効日を合意エンジンから逆参照できるようにする
@@ -54,3 +60,4 @@
 - 地質未確認
 - OCR候補競合
 - 見積行と工種候補が不一致
+- active knowledge pack を無視した数量採用

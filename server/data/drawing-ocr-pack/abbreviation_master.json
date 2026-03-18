@@ -1,0 +1,722 @@
+[
+  {
+    "abbr_id": "ABR_001",
+    "abbreviation": "BM",
+    "canonical_label": "ベンチマーク",
+    "domain": "共通",
+    "meaning": "基準高点",
+    "group_type": "level_reference"
+  },
+  {
+    "abbr_id": "ABR_002",
+    "abbreviation": "GL",
+    "canonical_label": "グランドライン",
+    "domain": "共通",
+    "meaning": "地盤面/地盤高さ基準",
+    "group_type": "level_reference"
+  },
+  {
+    "abbr_id": "ABR_003",
+    "abbreviation": "FL",
+    "canonical_label": "フロアライン",
+    "domain": "建築",
+    "meaning": "床仕上げ高さ基準",
+    "group_type": "level_reference"
+  },
+  {
+    "abbr_id": "ABR_004",
+    "abbreviation": "SL",
+    "canonical_label": "スラブレベル",
+    "domain": "構造",
+    "meaning": "スラブ高さ",
+    "group_type": "level_reference"
+  },
+  {
+    "abbr_id": "ABR_005",
+    "abbreviation": "CH",
+    "canonical_label": "天井高さ",
+    "domain": "建築",
+    "meaning": "天井高さ",
+    "group_type": "dimension"
+  },
+  {
+    "abbr_id": "ABR_006",
+    "abbreviation": "CL",
+    "canonical_label": "センターライン",
+    "domain": "共通",
+    "meaning": "中心線",
+    "group_type": "grid"
+  },
+  {
+    "abbr_id": "ABR_007",
+    "abbreviation": "DN",
+    "canonical_label": "下り",
+    "domain": "共通",
+    "meaning": "階段等の下り方向",
+    "group_type": "direction"
+  },
+  {
+    "abbr_id": "ABR_008",
+    "abbreviation": "UP",
+    "canonical_label": "上り",
+    "domain": "共通",
+    "meaning": "階段等の上り方向",
+    "group_type": "direction"
+  },
+  {
+    "abbr_id": "ABR_009",
+    "abbreviation": "PS",
+    "canonical_label": "パイプスペース",
+    "domain": "建築/設備",
+    "meaning": "配管スペース",
+    "group_type": "space"
+  },
+  {
+    "abbr_id": "ABR_010",
+    "abbreviation": "EPS",
+    "canonical_label": "電気パイプスペース",
+    "domain": "電気",
+    "meaning": "電気スペース",
+    "group_type": "space"
+  },
+  {
+    "abbr_id": "ABR_011",
+    "abbreviation": "DS",
+    "canonical_label": "ダクトスペース",
+    "domain": "機械",
+    "meaning": "ダクトスペース",
+    "group_type": "space"
+  },
+  {
+    "abbr_id": "ABR_012",
+    "abbreviation": "MB",
+    "canonical_label": "メーターボックス",
+    "domain": "設備",
+    "meaning": "メーター収納部",
+    "group_type": "space"
+  },
+  {
+    "abbr_id": "ABR_013",
+    "abbreviation": "RCP",
+    "canonical_label": "反射天井伏図/天井伏図",
+    "domain": "建築",
+    "meaning": "見上げ天井図",
+    "group_type": "sheet"
+  },
+  {
+    "abbr_id": "ABR_014",
+    "abbreviation": "RC",
+    "canonical_label": "鉄筋コンクリート",
+    "domain": "構造",
+    "meaning": "Reinforced Concrete",
+    "group_type": "structure"
+  },
+  {
+    "abbr_id": "ABR_015",
+    "abbreviation": "SRC",
+    "canonical_label": "鉄骨鉄筋コンクリート",
+    "domain": "構造",
+    "meaning": "Steel Reinforced Concrete",
+    "group_type": "structure"
+  },
+  {
+    "abbr_id": "ABR_016",
+    "abbreviation": "S",
+    "canonical_label": "鉄骨",
+    "domain": "構造",
+    "meaning": "Steel",
+    "group_type": "structure"
+  },
+  {
+    "abbr_id": "ABR_017",
+    "abbreviation": "PCa",
+    "canonical_label": "プレキャストコンクリート",
+    "domain": "構造",
+    "meaning": "Precast Concrete",
+    "group_type": "structure"
+  },
+  {
+    "abbr_id": "ABR_018",
+    "abbreviation": "LGS",
+    "canonical_label": "軽量鉄骨下地",
+    "domain": "内装",
+    "meaning": "Light Gauge Steel",
+    "group_type": "material"
+  },
+  {
+    "abbr_id": "ABR_019",
+    "abbreviation": "CB",
+    "canonical_label": "コンクリートブロック",
+    "domain": "建築",
+    "meaning": "Concrete Block",
+    "group_type": "material"
+  },
+  {
+    "abbr_id": "ABR_020",
+    "abbreviation": "ALC",
+    "canonical_label": "軽量気泡コンクリート",
+    "domain": "建築",
+    "meaning": "Autoclaved Lightweight Concrete",
+    "group_type": "material"
+  },
+  {
+    "abbr_id": "ABR_021",
+    "abbreviation": "ECP",
+    "canonical_label": "押出成形セメント板",
+    "domain": "建築",
+    "meaning": "Extruded Cement Panel",
+    "group_type": "material"
+  },
+  {
+    "abbr_id": "ABR_022",
+    "abbreviation": "GB-R",
+    "canonical_label": "せっこうボード",
+    "domain": "内装",
+    "meaning": "Gypsum Board Regular",
+    "group_type": "material"
+  },
+  {
+    "abbr_id": "ABR_023",
+    "abbreviation": "GB-F",
+    "canonical_label": "強化せっこうボード",
+    "domain": "内装",
+    "meaning": "Fire-resistant Gypsum Board",
+    "group_type": "material"
+  },
+  {
+    "abbr_id": "ABR_024",
+    "abbreviation": "GB-D",
+    "canonical_label": "化粧せっこうボード",
+    "domain": "内装",
+    "meaning": "Decorative Gypsum Board",
+    "group_type": "material"
+  },
+  {
+    "abbr_id": "ABR_025",
+    "abbreviation": "SOP",
+    "canonical_label": "合成樹脂調合ペイント",
+    "domain": "塗装",
+    "meaning": "Synthetic Resin Paint",
+    "group_type": "finish"
+  },
+  {
+    "abbr_id": "ABR_026",
+    "abbreviation": "EP",
+    "canonical_label": "合成樹脂エマルションペイント",
+    "domain": "塗装",
+    "meaning": "Emulsion Paint",
+    "group_type": "finish"
+  },
+  {
+    "abbr_id": "ABR_027",
+    "abbreviation": "DP",
+    "canonical_label": "耐候性塗料",
+    "domain": "塗装",
+    "meaning": "Durable Paint",
+    "group_type": "finish"
+  },
+  {
+    "abbr_id": "ABR_028",
+    "abbreviation": "UC",
+    "canonical_label": "ウレタン塗膜防水",
+    "domain": "防水",
+    "meaning": "Urethane Coating Waterproofing",
+    "group_type": "finish"
+  },
+  {
+    "abbr_id": "ABR_029",
+    "abbreviation": "SS",
+    "canonical_label": "ステンレス",
+    "domain": "建築",
+    "meaning": "Stainless Steel",
+    "group_type": "material"
+  },
+  {
+    "abbr_id": "ABR_030",
+    "abbreviation": "PL",
+    "canonical_label": "プレート",
+    "domain": "鉄骨",
+    "meaning": "Steel Plate",
+    "group_type": "member"
+  },
+  {
+    "abbr_id": "ABR_031",
+    "abbreviation": "FB",
+    "canonical_label": "フラットバー",
+    "domain": "鉄骨",
+    "meaning": "Flat Bar",
+    "group_type": "member"
+  },
+  {
+    "abbr_id": "ABR_032",
+    "abbreviation": "L",
+    "canonical_label": "アングル",
+    "domain": "鉄骨",
+    "meaning": "Angle Steel",
+    "group_type": "member"
+  },
+  {
+    "abbr_id": "ABR_033",
+    "abbreviation": "C",
+    "canonical_label": "チャンネル",
+    "domain": "鉄骨",
+    "meaning": "Channel Steel",
+    "group_type": "member"
+  },
+  {
+    "abbr_id": "ABR_034",
+    "abbreviation": "H",
+    "canonical_label": "H形鋼",
+    "domain": "鉄骨",
+    "meaning": "H-beam",
+    "group_type": "member"
+  },
+  {
+    "abbr_id": "ABR_035",
+    "abbreviation": "HTB",
+    "canonical_label": "高力ボルト",
+    "domain": "鉄骨",
+    "meaning": "High Tension Bolt",
+    "group_type": "fastener"
+  },
+  {
+    "abbr_id": "ABR_036",
+    "abbreviation": "BPL",
+    "canonical_label": "ベースプレート",
+    "domain": "鉄骨",
+    "meaning": "Base Plate",
+    "group_type": "connection"
+  },
+  {
+    "abbr_id": "ABR_037",
+    "abbreviation": "A.BOLT",
+    "canonical_label": "アンカーボルト",
+    "domain": "鉄骨",
+    "meaning": "Anchor Bolt",
+    "group_type": "fastener"
+  },
+  {
+    "abbr_id": "ABR_038",
+    "abbreviation": "MCCB",
+    "canonical_label": "配線用遮断器",
+    "domain": "電気",
+    "meaning": "Molded Case Circuit Breaker",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_039",
+    "abbreviation": "ELCB",
+    "canonical_label": "漏電遮断器",
+    "domain": "電気",
+    "meaning": "Earth Leakage Circuit Breaker",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_040",
+    "abbreviation": "LBS",
+    "canonical_label": "高圧負荷開閉器",
+    "domain": "電気",
+    "meaning": "Load Break Switch",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_041",
+    "abbreviation": "VCB",
+    "canonical_label": "真空遮断器",
+    "domain": "電気",
+    "meaning": "Vacuum Circuit Breaker",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_042",
+    "abbreviation": "TR",
+    "canonical_label": "変圧器",
+    "domain": "電気",
+    "meaning": "Transformer",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_043",
+    "abbreviation": "MDB",
+    "canonical_label": "主幹分電盤",
+    "domain": "電気",
+    "meaning": "Main Distribution Board",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_044",
+    "abbreviation": "LCP",
+    "canonical_label": "照明制御盤",
+    "domain": "電気",
+    "meaning": "Lighting Control Panel",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_045",
+    "abbreviation": "TEL",
+    "canonical_label": "電話",
+    "domain": "電気",
+    "meaning": "Telephone",
+    "group_type": "low_voltage"
+  },
+  {
+    "abbr_id": "ABR_046",
+    "abbreviation": "LAN",
+    "canonical_label": "情報配線",
+    "domain": "電気",
+    "meaning": "Local Area Network",
+    "group_type": "low_voltage"
+  },
+  {
+    "abbr_id": "ABR_047",
+    "abbreviation": "TV",
+    "canonical_label": "テレビ共聴",
+    "domain": "電気",
+    "meaning": "Television",
+    "group_type": "low_voltage"
+  },
+  {
+    "abbr_id": "ABR_048",
+    "abbreviation": "CCTV",
+    "canonical_label": "監視カメラ",
+    "domain": "電気",
+    "meaning": "Closed Circuit Television",
+    "group_type": "low_voltage"
+  },
+  {
+    "abbr_id": "ABR_049",
+    "abbreviation": "FA",
+    "canonical_label": "火災報知",
+    "domain": "電気",
+    "meaning": "Fire Alarm",
+    "group_type": "low_voltage"
+  },
+  {
+    "abbr_id": "ABR_050",
+    "abbreviation": "EM-EEF",
+    "canonical_label": "低圧配線ケーブル",
+    "domain": "電気",
+    "meaning": "ケーブル記号",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_051",
+    "abbreviation": "EM-CET",
+    "canonical_label": "幹線ケーブル",
+    "domain": "電気",
+    "meaning": "ケーブル記号",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_052",
+    "abbreviation": "PF",
+    "canonical_label": "合成樹脂可とう電線管",
+    "domain": "電気",
+    "meaning": "PF conduit",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_053",
+    "abbreviation": "CD",
+    "canonical_label": "合成樹脂製可とう電線管",
+    "domain": "電気",
+    "meaning": "CD conduit",
+    "group_type": "electrical"
+  },
+  {
+    "abbr_id": "ABR_054",
+    "abbreviation": "SP",
+    "canonical_label": "スプリンクラー",
+    "domain": "機械",
+    "meaning": "Sprinkler",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_055",
+    "abbreviation": "FCU",
+    "canonical_label": "ファンコイルユニット",
+    "domain": "機械",
+    "meaning": "Fan Coil Unit",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_056",
+    "abbreviation": "AHU",
+    "canonical_label": "空気調和機",
+    "domain": "機械",
+    "meaning": "Air Handling Unit",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_057",
+    "abbreviation": "PAU",
+    "canonical_label": "外気処理機",
+    "domain": "機械",
+    "meaning": "Pre-treated Air Unit",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_058",
+    "abbreviation": "OAU",
+    "canonical_label": "外気処理ユニット",
+    "domain": "機械",
+    "meaning": "Outdoor Air Unit",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_059",
+    "abbreviation": "EF",
+    "canonical_label": "排気ファン",
+    "domain": "機械",
+    "meaning": "Exhaust Fan",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_060",
+    "abbreviation": "SF",
+    "canonical_label": "給気ファン",
+    "domain": "機械",
+    "meaning": "Supply Fan",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_061",
+    "abbreviation": "FD",
+    "canonical_label": "防火ダンパー",
+    "domain": "機械",
+    "meaning": "Fire Damper",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_062",
+    "abbreviation": "MD",
+    "canonical_label": "モーターダンパー",
+    "domain": "機械",
+    "meaning": "Motorized Damper",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_063",
+    "abbreviation": "SA",
+    "canonical_label": "給気",
+    "domain": "機械",
+    "meaning": "Supply Air",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_064",
+    "abbreviation": "RA",
+    "canonical_label": "還気",
+    "domain": "機械",
+    "meaning": "Return Air",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_065",
+    "abbreviation": "EA",
+    "canonical_label": "排気",
+    "domain": "機械",
+    "meaning": "Exhaust Air",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_066",
+    "abbreviation": "OA",
+    "canonical_label": "外気",
+    "domain": "機械",
+    "meaning": "Outside Air",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_067",
+    "abbreviation": "CHW",
+    "canonical_label": "冷水",
+    "domain": "機械",
+    "meaning": "Chilled Water",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_068",
+    "abbreviation": "HHW",
+    "canonical_label": "温水",
+    "domain": "機械",
+    "meaning": "Hot Heating Water",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_069",
+    "abbreviation": "R",
+    "canonical_label": "冷媒",
+    "domain": "機械",
+    "meaning": "Refrigerant",
+    "group_type": "hvac"
+  },
+  {
+    "abbr_id": "ABR_070",
+    "abbreviation": "D",
+    "canonical_label": "ドレン",
+    "domain": "機械",
+    "meaning": "Drain",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_071",
+    "abbreviation": "W",
+    "canonical_label": "給水",
+    "domain": "機械",
+    "meaning": "Water Supply",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_072",
+    "abbreviation": "HWS",
+    "canonical_label": "給湯",
+    "domain": "機械",
+    "meaning": "Hot Water Supply",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_073",
+    "abbreviation": "VP",
+    "canonical_label": "硬質塩化ビニル管",
+    "domain": "機械",
+    "meaning": "PVC Pipe",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_074",
+    "abbreviation": "VU",
+    "canonical_label": "排水用塩ビ管",
+    "domain": "機械",
+    "meaning": "PVC Drain Pipe",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_075",
+    "abbreviation": "SGP",
+    "canonical_label": "配管用炭素鋼鋼管",
+    "domain": "機械",
+    "meaning": "Steel Gas Pipe/General Pipe",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_076",
+    "abbreviation": "SUS",
+    "canonical_label": "ステンレス鋼管",
+    "domain": "機械",
+    "meaning": "Stainless Pipe",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_077",
+    "abbreviation": "CIP",
+    "canonical_label": "鋳鉄管",
+    "domain": "機械",
+    "meaning": "Cast Iron Pipe",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_078",
+    "abbreviation": "COA",
+    "canonical_label": "掃除口",
+    "domain": "機械",
+    "meaning": "Clean Out Access",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_079",
+    "abbreviation": "GV",
+    "canonical_label": "仕切弁",
+    "domain": "機械",
+    "meaning": "Gate Valve",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_080",
+    "abbreviation": "CV",
+    "canonical_label": "逆止弁",
+    "domain": "機械",
+    "meaning": "Check Valve",
+    "group_type": "plumbing"
+  },
+  {
+    "abbr_id": "ABR_081",
+    "abbreviation": "PIT",
+    "canonical_label": "ピット",
+    "domain": "建築",
+    "meaning": "設備・構造用の掘込スペース",
+    "group_type": "space"
+  },
+  {
+    "abbr_id": "ABR_082",
+    "abbreviation": "TP",
+    "canonical_label": "トップレベル/天端",
+    "domain": "土木",
+    "meaning": "構造物天端高",
+    "group_type": "civil"
+  },
+  {
+    "abbr_id": "ABR_083",
+    "abbreviation": "DL",
+    "canonical_label": "設計路面高/計画高",
+    "domain": "土木",
+    "meaning": "Design Level",
+    "group_type": "civil"
+  },
+  {
+    "abbr_id": "ABR_084",
+    "abbreviation": "FH",
+    "canonical_label": "計画高",
+    "domain": "土木",
+    "meaning": "Finished Height",
+    "group_type": "civil"
+  },
+  {
+    "abbr_id": "ABR_085",
+    "abbreviation": "GH",
+    "canonical_label": "現況高",
+    "domain": "土木",
+    "meaning": "Ground Height",
+    "group_type": "civil"
+  },
+  {
+    "abbr_id": "ABR_086",
+    "abbreviation": "No.",
+    "canonical_label": "測点番号",
+    "domain": "土木",
+    "meaning": "Station Number",
+    "group_type": "civil"
+  },
+  {
+    "abbr_id": "ABR_087",
+    "abbreviation": "IP",
+    "canonical_label": "交点",
+    "domain": "土木",
+    "meaning": "Intersection Point",
+    "group_type": "civil"
+  },
+  {
+    "abbr_id": "ABR_088",
+    "abbreviation": "R",
+    "canonical_label": "曲線半径",
+    "domain": "土木",
+    "meaning": "Radius",
+    "group_type": "civil"
+  },
+  {
+    "abbr_id": "ABR_089",
+    "abbreviation": "L",
+    "canonical_label": "延長/長さ",
+    "domain": "土木",
+    "meaning": "Length",
+    "group_type": "civil"
+  },
+  {
+    "abbr_id": "ABR_090",
+    "abbreviation": "i",
+    "canonical_label": "勾配",
+    "domain": "土木",
+    "meaning": "Grade",
+    "group_type": "civil"
+  }
+]

@@ -1,0 +1,2619 @@
+[
+  {
+    "knowledge_id": "K001",
+    "category_l1": "媒体ルーティング",
+    "category_l2": "前処理",
+    "knowledge_name": "原本種別判定",
+    "purpose": "OCRを実行する前に最適読取経路を選ぶ",
+    "what_to_detect": "CAD/IFC/ベクタPDF/ラスタPDF/画像の識別",
+    "input_signals_json": [
+      "ファイル拡張子",
+      "テキストレイヤ有無",
+      "線分密度",
+      "解像度"
+    ],
+    "decision_rule": "CAD/IFC/埋込テキストPDFを優先。ラスタ系のみOCR対象。",
+    "output_fields_json": [
+      "source_media_type",
+      "preferred_pipeline"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "cad",
+      "ifc",
+      "vector_pdf",
+      "raster_pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "route",
+    "confidence_rule": "媒体判定確度0.9未満は人確認",
+    "escalation_trigger": "原本不明・拡張子不整合・テキストレイヤ偽陽性",
+    "example_terms_json": [
+      "dwg",
+      "ifc",
+      "pdf",
+      "jpg"
+    ],
+    "normalization_rule": "media_typeを標準値へ正規化",
+    "priority": "P0",
+    "reference_group": "原本ルーティング"
+  },
+  {
+    "knowledge_id": "K002",
+    "category_l1": "媒体ルーティング",
+    "category_l2": "前処理",
+    "knowledge_name": "埋込テキスト優先",
+    "purpose": "文字OCRを不要化・補助化する",
+    "what_to_detect": "PDF内埋込テキストの存在と抽出可能性",
+    "input_signals_json": [
+      "文字選択可否",
+      "抽出文字密度"
+    ],
+    "decision_rule": "抽出可能ならOCRではなくテキスト抽出を主経路にする",
+    "output_fields_json": [
+      "text_layer_available",
+      "text_extract_mode"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "vector_pdf"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "route",
+    "confidence_rule": "抽出文字と表示位置の一致率で評価",
+    "escalation_trigger": "文字化け・座標欠落",
+    "example_terms_json": [
+      "テキスト選択",
+      "コピー可能"
+    ],
+    "normalization_rule": "ocr_mode=false, text_extract_mode=true",
+    "priority": "P0",
+    "reference_group": "原本ルーティング"
+  },
+  {
+    "knowledge_id": "K003",
+    "category_l1": "媒体ルーティング",
+    "category_l2": "前処理",
+    "knowledge_name": "ページ分割",
+    "purpose": "複数図面混在PDFを個票へ分割",
+    "what_to_detect": "1ページ1図面か複数図面かの判定",
+    "input_signals_json": [
+      "表題欄個数",
+      "外枠個数",
+      "区切り線"
+    ],
+    "decision_rule": "表題欄/輪郭線が複数なら仮分割",
+    "output_fields_json": [
+      "sheet_split_required",
+      "split_regions"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "preprocess",
+    "confidence_rule": "表題欄検出0.85未満なら手確認",
+    "escalation_trigger": "分割候補が重複・余白誤認",
+    "example_terms_json": [
+      "A1×2面",
+      "複合スキャン"
+    ],
+    "normalization_rule": "region単位にsheet_id付与",
+    "priority": "P1",
+    "reference_group": "原本ルーティング"
+  },
+  {
+    "knowledge_id": "K004",
+    "category_l1": "媒体ルーティング",
+    "category_l2": "前処理",
+    "knowledge_name": "回転方向判定",
+    "purpose": "横書き・縦図面・縦断図の回転を補正",
+    "what_to_detect": "90/180/270度回転の必要性",
+    "input_signals_json": [
+      "文字方向",
+      "表題欄位置",
+      "方位記号"
+    ],
+    "decision_rule": "表題欄が下辺/右辺になるよう正規化。道路縦断はページ全体回転を別管理。",
+    "output_fields_json": [
+      "page_rotation_deg"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "preprocess",
+    "confidence_rule": "主要文字の読取方向一致率で評価",
+    "escalation_trigger": "回転候補が同率",
+    "example_terms_json": [
+      "横置き",
+      "縦置き"
+    ],
+    "normalization_rule": "rotation_degを0/90/180/270へ正規化",
+    "priority": "P1",
+    "reference_group": "製図共通"
+  },
+  {
+    "knowledge_id": "K005",
+    "category_l1": "媒体ルーティング",
+    "category_l2": "前処理",
+    "knowledge_name": "解像度/線品質判定",
+    "purpose": "OCRと線分解析の成功率を上げる",
+    "what_to_detect": "DPI不足・ぼけ・ノイズ・傾き",
+    "input_signals_json": [
+      "DPI",
+      "コントラスト",
+      "ノイズ率"
+    ],
+    "decision_rule": "閾値未満なら再スキャン要求または画質改善前処理",
+    "output_fields_json": [
+      "image_quality_score",
+      "preprocess_flags"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "image",
+      "raster_pdf"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "preprocess",
+    "confidence_rule": "quality_score>=0.75で自動処理",
+    "escalation_trigger": "DPI不足・大きな傾き",
+    "example_terms_json": [
+      "200dpi",
+      "斜行"
+    ],
+    "normalization_rule": "flag列に改善要求を残す",
+    "priority": "P0",
+    "reference_group": "OCR実装"
+  },
+  {
+    "knowledge_id": "K006",
+    "category_l1": "媒体ルーティング",
+    "category_l2": "前処理",
+    "knowledge_name": "凡例/表題欄優先抽出",
+    "purpose": "全体解釈の基点を最初に取る",
+    "what_to_detect": "凡例領域・表題欄領域の候補",
+    "input_signals_json": [
+      "枠線",
+      "高密度文字領域",
+      "右下集中"
+    ],
+    "decision_rule": "本文抽出前に凡例と表題欄を切り出す",
+    "output_fields_json": [
+      "legend_regions",
+      "titleblock_region"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "preprocess",
+    "confidence_rule": "領域IoUと文字密度で評価",
+    "escalation_trigger": "凡例未配置・表題欄カスタム",
+    "example_terms_json": [
+      "凡例",
+      "表題欄"
+    ],
+    "normalization_rule": "region_typeをlegend/titleblockに正規化",
+    "priority": "P0",
+    "reference_group": "製図共通"
+  },
+  {
+    "knowledge_id": "K007",
+    "category_l1": "シートメタデータ",
+    "category_l2": "表題欄",
+    "knowledge_name": "表題欄の主要項目読取",
+    "purpose": "図面IDと系列を確定する",
+    "what_to_detect": "図面番号、図面名、縮尺、改訂、工事名、棟、工区",
+    "input_signals_json": [
+      "表題欄テキスト",
+      "罫線",
+      "見出し語"
+    ],
+    "decision_rule": "表題欄ラベルと値を対で抽出し標準キーへ写像",
+    "output_fields_json": [
+      "drawing_no",
+      "drawing_title",
+      "scale_text",
+      "revision",
+      "project_name",
+      "building_name",
+      "zone_name"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "必須5項目の抽出率>=0.8",
+    "escalation_trigger": "図面番号欠落・複数改訂欄",
+    "example_terms_json": [
+      "図面番号",
+      "縮尺",
+      "工事名"
+    ],
+    "normalization_rule": "label別に標準キーへ正規化",
+    "priority": "P0",
+    "reference_group": "表題欄"
+  },
+  {
+    "knowledge_id": "K008",
+    "category_l1": "シートメタデータ",
+    "category_l2": "表題欄",
+    "knowledge_name": "図面目録との照合",
+    "purpose": "欠番・誤分類を防ぐ",
+    "what_to_detect": "目録上の図面番号・図面名・改訂",
+    "input_signals_json": [
+      "図面目録",
+      "表題欄"
+    ],
+    "decision_rule": "目録がある場合は表題欄抽出値を照合し正規化",
+    "output_fields_json": [
+      "index_match_status",
+      "sheet_order"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "drawing_index",
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "一致率>=0.9で確定",
+    "escalation_trigger": "番号不一致・改訂差分",
+    "example_terms_json": [
+      "目録",
+      "一覧"
+    ],
+    "normalization_rule": "canonical_drawing_noを採用",
+    "priority": "P1",
+    "reference_group": "図面目録"
+  },
+  {
+    "knowledge_id": "K009",
+    "category_l1": "シートメタデータ",
+    "category_l2": "表題欄",
+    "knowledge_name": "棟・工区・対象範囲抽出",
+    "purpose": "同一案件内の対象範囲を誤らない",
+    "what_to_detect": "棟名、ゾーン、工区、住戸タイプ",
+    "input_signals_json": [
+      "表題欄",
+      "図中注記"
+    ],
+    "decision_rule": "棟/工区語彙辞書と一致するものを抽出",
+    "output_fields_json": [
+      "building_name",
+      "zone_name",
+      "scope_text"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "辞書一致+位置スコア",
+    "escalation_trigger": "複数棟併記",
+    "example_terms_json": [
+      "A棟",
+      "1工区",
+      "住戸タイプA"
+    ],
+    "normalization_rule": "棟名は英数字・漢字ゆれ統一",
+    "priority": "P1",
+    "reference_group": "表題欄"
+  },
+  {
+    "knowledge_id": "K010",
+    "category_l1": "シートメタデータ",
+    "category_l2": "表題欄",
+    "knowledge_name": "改訂差分管理",
+    "purpose": "最新図を優先し旧版混入を防ぐ",
+    "what_to_detect": "改訂記号、改訂日、改訂内容",
+    "input_signals_json": [
+      "改訂表",
+      "雲マーク",
+      "改訂欄"
+    ],
+    "decision_rule": "改訂表があれば最新版をcanonicalとし差分領域も記録",
+    "output_fields_json": [
+      "revision_no",
+      "revision_date",
+      "revision_scope"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "改訂欄の抽出完全性で評価",
+    "escalation_trigger": "改訂日欠落・旧版重複",
+    "example_terms_json": [
+      "改訂",
+      "Rev."
+    ],
+    "normalization_rule": "最新版フラグを付与",
+    "priority": "P0",
+    "reference_group": "表題欄"
+  },
+  {
+    "knowledge_id": "K011",
+    "category_l1": "製図文法",
+    "category_l2": "図形・注記",
+    "knowledge_name": "線種・線幅の意味付け",
+    "purpose": "現況/計画/切断/見え掛りの識別を助ける",
+    "what_to_detect": "実線・破線・一点鎖線・太線・細線",
+    "input_signals_json": [
+      "線分属性",
+      "凡例"
+    ],
+    "decision_rule": "凡例優先で意味確定。凡例無ければ分野別既定を仮適用。",
+    "output_fields_json": [
+      "line_semantics"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "cad",
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "凡例一致が最優先",
+    "escalation_trigger": "凡例なし・複数意味競合",
+    "example_terms_json": [
+      "破線",
+      "一点鎖線"
+    ],
+    "normalization_rule": "line_style_codeを標準語へ",
+    "priority": "P1",
+    "reference_group": "製図文法"
+  },
+  {
+    "knowledge_id": "K012",
+    "category_l1": "製図文法",
+    "category_l2": "図形・注記",
+    "knowledge_name": "引出線と注記の結合",
+    "purpose": "文字を対象物に正しく結び付ける",
+    "what_to_detect": "引出線先端、注記文字列、対象図形",
+    "input_signals_json": [
+      "線端点",
+      "文字近傍"
+    ],
+    "decision_rule": "最短距離ではなく矢印/ドット終端と対象接触を優先",
+    "output_fields_json": [
+      "leader_target_link"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "引出線追跡完了率",
+    "escalation_trigger": "引出線交差・多段引出",
+    "example_terms_json": [
+      "L-50×50",
+      "FD"
+    ],
+    "normalization_rule": "annotation_target_idを生成",
+    "priority": "P0",
+    "reference_group": "製図文法"
+  },
+  {
+    "knowledge_id": "K013",
+    "category_l1": "製図文法",
+    "category_l2": "図形・注記",
+    "knowledge_name": "表・スケジュール領域検出",
+    "purpose": "建具表・仕上表・機器表を正しく読む",
+    "what_to_detect": "罫線グリッド、見出し行、単位欄",
+    "input_signals_json": [
+      "罫線",
+      "揃ったテキスト"
+    ],
+    "decision_rule": "セル境界を優先し表パーサで抽出",
+    "output_fields_json": [
+      "table_regions",
+      "table_type"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "door_window_schedule",
+      "finish_schedule",
+      "equipment_schedule"
+    ],
+    "pipeline_stage": "preprocess",
+    "confidence_rule": "表認識F1で評価",
+    "escalation_trigger": "罫線欠落・セル結合",
+    "example_terms_json": [
+      "建具表",
+      "仕上表",
+      "機器表"
+    ],
+    "normalization_rule": "table_typeを標準分類",
+    "priority": "P0",
+    "reference_group": "表解析"
+  },
+  {
+    "knowledge_id": "K014",
+    "category_l1": "製図文法",
+    "category_l2": "図形・注記",
+    "knowledge_name": "吹出し参照の追跡",
+    "purpose": "詳細図・断面図との参照関係を作る",
+    "what_to_detect": "詳細番号、参照図番号、矢印",
+    "input_signals_json": [
+      "吹出し記号",
+      "テキスト"
+    ],
+    "decision_rule": "番号+矢印方向+図面番号をペア化",
+    "output_fields_json": [
+      "detail_ref",
+      "section_ref"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "link",
+    "confidence_rule": "参照番号抽出率で評価",
+    "escalation_trigger": "番号欠落・参照先未読込",
+    "example_terms_json": [
+      "詳細A-12",
+      "断面1"
+    ],
+    "normalization_rule": "ref_idをsheet_no+detail_noで正規化",
+    "priority": "P1",
+    "reference_group": "製図文法"
+  },
+  {
+    "knowledge_id": "K015",
+    "category_l1": "製図文法",
+    "category_l2": "図形・注記",
+    "knowledge_name": "ハッチング・塗り区分の読取り",
+    "purpose": "材料・撤去/新設・仕上区分を判定",
+    "what_to_detect": "ハッチング角度・密度・塗り色",
+    "input_signals_json": [
+      "塗りパターン",
+      "凡例"
+    ],
+    "decision_rule": "凡例があれば材料/状態へ変換。無ければunknown扱い。",
+    "output_fields_json": [
+      "hatch_material",
+      "state_flag"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "cad",
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "凡例一致必須寄り",
+    "escalation_trigger": "凡例なし・類似パターン",
+    "example_terms_json": [
+      "コンクリートハッチ",
+      "撤去色"
+    ],
+    "normalization_rule": "hatch_codeを辞書値へ",
+    "priority": "P1",
+    "reference_group": "製図文法"
+  },
+  {
+    "knowledge_id": "K016",
+    "category_l1": "単位・縮尺・方位",
+    "category_l2": "解釈",
+    "knowledge_name": "建築・設備の長さ単位推定",
+    "purpose": "数量解釈ミスを防ぐ",
+    "what_to_detect": "寸法値、単位記号有無、図面分野",
+    "input_signals_json": [
+      "寸法文字",
+      "表題欄分野"
+    ],
+    "decision_rule": "建築/設備はmm省略を既定。単位明示があればそれを優先。",
+    "output_fields_json": [
+      "length_unit"
+    ],
+    "applies_to_disciplines_json": [
+      "建築",
+      "設備"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "分野判定と単位注記の整合",
+    "escalation_trigger": "m表記混在・土木図混入",
+    "example_terms_json": [
+      "3000",
+      "150"
+    ],
+    "normalization_rule": "mmに正規化",
+    "priority": "P0",
+    "reference_group": "単位・縮尺"
+  },
+  {
+    "knowledge_id": "K017",
+    "category_l1": "単位・縮尺・方位",
+    "category_l2": "解釈",
+    "knowledge_name": "土木・道路の長さ単位推定",
+    "purpose": "土木図のm解釈を固定する",
+    "what_to_detect": "測点、幅員、標高、小数表記",
+    "input_signals_json": [
+      "No.",
+      "GH",
+      "FH",
+      "勾配"
+    ],
+    "decision_rule": "道路・造成図はm系を既定。標高もm。",
+    "output_fields_json": [
+      "length_unit",
+      "elevation_unit"
+    ],
+    "applies_to_disciplines_json": [
+      "土木"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "road_plan",
+      "road_profile",
+      "cross_section",
+      "earthwork_plan"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "土木図識別確度で評価",
+    "escalation_trigger": "建築外構詳細との混在",
+    "example_terms_json": [
+      "幅員7.0",
+      "FH=12.345"
+    ],
+    "normalization_rule": "mに正規化",
+    "priority": "P0",
+    "reference_group": "単位・縮尺"
+  },
+  {
+    "knowledge_id": "K018",
+    "category_l1": "単位・縮尺・方位",
+    "category_l2": "解釈",
+    "knowledge_name": "縮尺読取",
+    "purpose": "図形寸法換算の前提を確定",
+    "what_to_detect": "1/100、1:100、S=1/50等",
+    "input_signals_json": [
+      "表題欄",
+      "図名直下"
+    ],
+    "decision_rule": "明記縮尺を採用。図中部分詳細はローカル縮尺を優先。",
+    "output_fields_json": [
+      "sheet_scale",
+      "local_scale_regions"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "縮尺文字抽出率",
+    "escalation_trigger": "部分詳細縮尺未取得",
+    "example_terms_json": [
+      "1/100",
+      "1:20"
+    ],
+    "normalization_rule": "scale_ratio数値化",
+    "priority": "P0",
+    "reference_group": "単位・縮尺"
+  },
+  {
+    "knowledge_id": "K019",
+    "category_l1": "単位・縮尺・方位",
+    "category_l2": "解釈",
+    "knowledge_name": "方位・視点方向解釈",
+    "purpose": "平面/天井/基礎/立面の視点を誤らない",
+    "what_to_detect": "北記号、図名、見上/見下注記",
+    "input_signals_json": [
+      "図名",
+      "方位記号",
+      "注記"
+    ],
+    "decision_rule": "平面=上から見下げ、天井伏図=見上げ、基礎伏図=見下げを既定",
+    "output_fields_json": [
+      "orientation",
+      "view_direction"
+    ],
+    "applies_to_disciplines_json": [
+      "建築",
+      "設備"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "floor_plan",
+      "ceiling_plan",
+      "foundation_plan"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "図名一致+注記一致",
+    "escalation_trigger": "図名欠落・特殊注記",
+    "example_terms_json": [
+      "天井伏図",
+      "基礎伏図"
+    ],
+    "normalization_rule": "view_directionをtop_down / bottom_upへ正規化",
+    "priority": "P0",
+    "reference_group": "単位・縮尺"
+  },
+  {
+    "knowledge_id": "K020",
+    "category_l1": "単位・縮尺・方位",
+    "category_l2": "解釈",
+    "knowledge_name": "道路図の配列文法解釈",
+    "purpose": "平面/縦断/横断の読み順を確定",
+    "what_to_detect": "上段平面、下段縦断、左→右測点配列",
+    "input_signals_json": [
+      "ページレイアウト",
+      "測点"
+    ],
+    "decision_rule": "道路系は上段平面・下段縦断を優先認識",
+    "output_fields_json": [
+      "road_layout_pattern"
+    ],
+    "applies_to_disciplines_json": [
+      "土木"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "road_plan",
+      "road_profile"
+    ],
+    "pipeline_stage": "classify",
+    "confidence_rule": "レイアウト一致率",
+    "escalation_trigger": "特異レイアウト",
+    "example_terms_json": [
+      "縦断面図",
+      "No.0"
+    ],
+    "normalization_rule": "reading_orderをleft_to_rightに固定",
+    "priority": "P1",
+    "reference_group": "道路図文法"
+  },
+  {
+    "knowledge_id": "K021",
+    "category_l1": "建築図",
+    "category_l2": "一般図・仕上",
+    "knowledge_name": "平面図の室情報抽出",
+    "purpose": "室単位での仕様・数量リンクを作る",
+    "what_to_detect": "室名、室番号、境界、面積",
+    "input_signals_json": [
+      "室内文字",
+      "壁輪郭",
+      "部屋タグ"
+    ],
+    "decision_rule": "室名文字が閉領域内にあればroom entity生成",
+    "output_fields_json": [
+      "room_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "建築"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "floor_plan"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "閉領域認識率と文字位置整合",
+    "escalation_trigger": "室境界不明・吹抜",
+    "example_terms_json": [
+      "LDK",
+      "101号室"
+    ],
+    "normalization_rule": "room_name/room_noを分離",
+    "priority": "P0",
+    "reference_group": "建築一般"
+  },
+  {
+    "knowledge_id": "K022",
+    "category_l1": "建築図",
+    "category_l2": "一般図・仕上",
+    "knowledge_name": "壁・開口・建具抽出",
+    "purpose": "建具表との結合を可能にする",
+    "what_to_detect": "壁線、開口、建具記号",
+    "input_signals_json": [
+      "壁線",
+      "建具記号",
+      "通り芯"
+    ],
+    "decision_rule": "壁線を軸に開口検出し建具記号と結合",
+    "output_fields_json": [
+      "wall_entities",
+      "door_entities",
+      "window_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "建築"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "floor_plan",
+      "elevation",
+      "door_window_schedule"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "建具記号との結合率",
+    "escalation_trigger": "二重壁・開口不明瞭",
+    "example_terms_json": [
+      "D-1",
+      "AW-2"
+    ],
+    "normalization_rule": "door/window typeコード正規化",
+    "priority": "P0",
+    "reference_group": "建築一般"
+  },
+  {
+    "knowledge_id": "K023",
+    "category_l1": "建築図",
+    "category_l2": "一般図・仕上",
+    "knowledge_name": "立面・断面の高さ情報抽出",
+    "purpose": "階高・開口高さ・外壁高さを読む",
+    "what_to_detect": "FL,GL,パラペット,軒高",
+    "input_signals_json": [
+      "高さ寸法",
+      "レベル注記"
+    ],
+    "decision_rule": "高さ線とレベル注記を階ごとに整理",
+    "output_fields_json": [
+      "elevation_levels",
+      "story_heights"
+    ],
+    "applies_to_disciplines_json": [
+      "建築"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "elevation",
+      "section"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "レベル注記の階対応率",
+    "escalation_trigger": "レベル基準混在",
+    "example_terms_json": [
+      "FL+3000",
+      "GL±0"
+    ],
+    "normalization_rule": "elevationをmmに統一",
+    "priority": "P1",
+    "reference_group": "建築一般"
+  },
+  {
+    "knowledge_id": "K024",
+    "category_l1": "建築図",
+    "category_l2": "一般図・仕上",
+    "knowledge_name": "天井伏図の器具位置抽出",
+    "purpose": "建築・設備・電気の器具位置照合を行う",
+    "what_to_detect": "照明、点検口、空調器具、感知器",
+    "input_signals_json": [
+      "天井伏図",
+      "器具記号",
+      "通り芯"
+    ],
+    "decision_rule": "見上げ図として器具座標を平面系へ投影",
+    "output_fields_json": [
+      "ceiling_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "建築",
+      "設備",
+      "電気"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "ceiling_plan"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "平面系変換整合率",
+    "escalation_trigger": "見上/見下誤判定",
+    "example_terms_json": [
+      "点検口",
+      "ダウンライト"
+    ],
+    "normalization_rule": "ceiling coordinate systemに正規化",
+    "priority": "P1",
+    "reference_group": "建築一般"
+  },
+  {
+    "knowledge_id": "K025",
+    "category_l1": "建築図",
+    "category_l2": "一般図・仕上",
+    "knowledge_name": "仕上表とのリンク",
+    "purpose": "室ごとの仕上属性を付与する",
+    "what_to_detect": "床・壁・天井仕上コード",
+    "input_signals_json": [
+      "仕上表",
+      "室名",
+      "部屋番号"
+    ],
+    "decision_rule": "室名/室番号優先で室entityへ付与",
+    "output_fields_json": [
+      "room_finish_attributes"
+    ],
+    "applies_to_disciplines_json": [
+      "建築"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "finish_schedule",
+      "floor_plan"
+    ],
+    "pipeline_stage": "link",
+    "confidence_rule": "室名一致率>=0.8",
+    "escalation_trigger": "室名ゆれ・室番号欠落",
+    "example_terms_json": [
+      "床:F1",
+      "壁:W2"
+    ],
+    "normalization_rule": "finish_codeを統一",
+    "priority": "P1",
+    "reference_group": "建築一般"
+  },
+  {
+    "knowledge_id": "K026",
+    "category_l1": "構造図",
+    "category_l2": "躯体・接合",
+    "knowledge_name": "基礎・杭情報抽出",
+    "purpose": "基礎数量・位置の起点を作る",
+    "what_to_detect": "杭記号、杭長、杭径、フーチング寸法",
+    "input_signals_json": [
+      "基礎伏図",
+      "杭伏図",
+      "注記"
+    ],
+    "decision_rule": "基礎/杭は平面位置+断面属性の2層で管理",
+    "output_fields_json": [
+      "foundation_entities",
+      "pile_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "構造"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "foundation_plan",
+      "pile_plan"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "位置と属性の両取得率",
+    "escalation_trigger": "杭表欠落・表現省略",
+    "example_terms_json": [
+      "PHC杭",
+      "φ600"
+    ],
+    "normalization_rule": "杭種別コード正規化",
+    "priority": "P0",
+    "reference_group": "構造図"
+  },
+  {
+    "knowledge_id": "K027",
+    "category_l1": "構造図",
+    "category_l2": "躯体・接合",
+    "knowledge_name": "RC配筋抽出",
+    "purpose": "径・本数・ピッチ・継手・かぶりを読む",
+    "what_to_detect": "Dxx,@yy,本数,定着,継手",
+    "input_signals_json": [
+      "配筋注記",
+      "部材符号"
+    ],
+    "decision_rule": "配筋注記を部材entityへ束ねる",
+    "output_fields_json": [
+      "rebar_specs"
+    ],
+    "applies_to_disciplines_json": [
+      "構造"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "foundation_rebar",
+      "wall_slab_rebar_detail"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "配筋パターン解析率",
+    "escalation_trigger": "複数部材共有注記",
+    "example_terms_json": [
+      "D13@200",
+      "4-D22"
+    ],
+    "normalization_rule": "径/本数/ピッチを独立項目化",
+    "priority": "P0",
+    "reference_group": "構造図"
+  },
+  {
+    "knowledge_id": "K028",
+    "category_l1": "構造図",
+    "category_l2": "躯体・接合",
+    "knowledge_name": "柱梁床符号と部材表の結合",
+    "purpose": "構造部材属性を確定する",
+    "what_to_detect": "柱符号、梁符号、スラブ符号、表",
+    "input_signals_json": [
+      "符号タグ",
+      "部材表"
+    ],
+    "decision_rule": "平面の符号を部材表と結合して断面/材料確定",
+    "output_fields_json": [
+      "struct_member_attributes"
+    ],
+    "applies_to_disciplines_json": [
+      "構造"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "framing_plan",
+      "column_schedule",
+      "beam_schedule"
+    ],
+    "pipeline_stage": "link",
+    "confidence_rule": "符号一致率",
+    "escalation_trigger": "同符号複数型・表抜け",
+    "example_terms_json": [
+      "C1",
+      "G2",
+      "S1"
+    ],
+    "normalization_rule": "member_idを階+符号で一意化",
+    "priority": "P0",
+    "reference_group": "構造図"
+  },
+  {
+    "knowledge_id": "K029",
+    "category_l1": "構造図",
+    "category_l2": "躯体・接合",
+    "knowledge_name": "鉄骨部材・接合抽出",
+    "purpose": "S造/鉄骨詳細を読めるようにする",
+    "what_to_detect": "部材サイズ、プレート、HTB、溶接",
+    "input_signals_json": [
+      "鉄骨図",
+      "詳細図",
+      "注記"
+    ],
+    "decision_rule": "部材はmember、接合はconnectionとして別entity",
+    "output_fields_json": [
+      "steel_members",
+      "steel_connections"
+    ],
+    "applies_to_disciplines_json": [
+      "構造"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "steel_general",
+      "steel_detail"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "部材記号解釈率",
+    "escalation_trigger": "縮尺小・注記集中",
+    "example_terms_json": [
+      "H-400x200x8x13",
+      "HTB M20"
+    ],
+    "normalization_rule": "鋼材サイズを構造化",
+    "priority": "P1",
+    "reference_group": "構造図"
+  },
+  {
+    "knowledge_id": "K030",
+    "category_l1": "構造図",
+    "category_l2": "躯体・接合",
+    "knowledge_name": "開口補強・貫通注意抽出",
+    "purpose": "設備貫通との干渉検知に使う",
+    "what_to_detect": "開口補強、スリーブ、NG貫通注記",
+    "input_signals_json": [
+      "開口詳細",
+      "注記"
+    ],
+    "decision_rule": "構造NG・条件付き可をQAルールへ送る",
+    "output_fields_json": [
+      "struct_penetration_constraints"
+    ],
+    "applies_to_disciplines_json": [
+      "構造",
+      "設備"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "wall_slab_rebar_detail",
+      "framing_plan"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "制約抽出率",
+    "escalation_trigger": "文章長く曖昧",
+    "example_terms_json": [
+      "開口補強",
+      "設備貫通禁止"
+    ],
+    "normalization_rule": "constraint_type化",
+    "priority": "P0",
+    "reference_group": "構造図"
+  },
+  {
+    "knowledge_id": "K031",
+    "category_l1": "電気設備図",
+    "category_l2": "系統・器具",
+    "knowledge_name": "照明器具抽出",
+    "purpose": "器具数量・回路・位置を取る",
+    "what_to_detect": "器具記号、器具番号、台数、回路",
+    "input_signals_json": [
+      "照明平面図",
+      "器具表"
+    ],
+    "decision_rule": "器具記号→器具表→回路の順に結合",
+    "output_fields_json": [
+      "lighting_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "電気"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "lighting_plan",
+      "equipment_schedule"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "記号と器具表結合率",
+    "escalation_trigger": "器具表別冊・記号凡例不明",
+    "example_terms_json": [
+      "DL",
+      "FL20W"
+    ],
+    "normalization_rule": "fixture_type_codeを標準化",
+    "priority": "P0",
+    "reference_group": "電気設備図"
+  },
+  {
+    "knowledge_id": "K032",
+    "category_l1": "電気設備図",
+    "category_l2": "系統・器具",
+    "knowledge_name": "スイッチ・コンセント抽出",
+    "purpose": "住戸/共用部の電気点数を取る",
+    "what_to_detect": "スイッチ記号、コンセント記号、用途",
+    "input_signals_json": [
+      "電灯平面図",
+      "動力平面図"
+    ],
+    "decision_rule": "記号近傍の回路/用途注記を付与",
+    "output_fields_json": [
+      "switch_entities",
+      "outlet_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "電気"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "lighting_plan",
+      "power_plan"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "記号分類率",
+    "escalation_trigger": "類似記号競合",
+    "example_terms_json": [
+      "2P15A",
+      "3路SW"
+    ],
+    "normalization_rule": "type/spec/heightを分離",
+    "priority": "P0",
+    "reference_group": "電気設備図"
+  },
+  {
+    "knowledge_id": "K033",
+    "category_l1": "電気設備図",
+    "category_l2": "系統・器具",
+    "knowledge_name": "盤・単線結線抽出",
+    "purpose": "系統と盤構成を取る",
+    "what_to_detect": "盤名称、回路数、MCCB、負荷名称",
+    "input_signals_json": [
+      "単線図",
+      "盤図"
+    ],
+    "decision_rule": "盤→回路→負荷の親子構造を生成",
+    "output_fields_json": [
+      "panel_entities",
+      "circuit_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "電気"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "single_line_diagram",
+      "panel_schedule"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "回路表解析率",
+    "escalation_trigger": "省略記号過多",
+    "example_terms_json": [
+      "L-1盤",
+      "MCCB 3P100AF"
+    ],
+    "normalization_rule": "panel_id/circuit_id標準化",
+    "priority": "P0",
+    "reference_group": "電気設備図"
+  },
+  {
+    "knowledge_id": "K034",
+    "category_l1": "電気設備図",
+    "category_l2": "系統・器具",
+    "knowledge_name": "火報・弱電抽出",
+    "purpose": "感知器・端子・カメラ等を読む",
+    "what_to_detect": "感知器種別、端子記号、回線",
+    "input_signals_json": [
+      "火報図",
+      "通信図"
+    ],
+    "decision_rule": "凡例優先で機器種別を確定",
+    "output_fields_json": [
+      "fire_alarm_entities",
+      "low_voltage_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "電気"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "fire_alarm_plan",
+      "telecom_plan"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "凡例一致率",
+    "escalation_trigger": "未登録機器記号",
+    "example_terms_json": [
+      "差動式スポット",
+      "LAN"
+    ],
+    "normalization_rule": "device_family標準化",
+    "priority": "P1",
+    "reference_group": "電気設備図"
+  },
+  {
+    "knowledge_id": "K035",
+    "category_l1": "電気設備図",
+    "category_l2": "系統・器具",
+    "knowledge_name": "構内配電・外灯抽出",
+    "purpose": "外構電気と建築電気をつなぐ",
+    "what_to_detect": "外灯、ハンドホール、埋設配管、引込",
+    "input_signals_json": [
+      "構内配電図",
+      "配置図"
+    ],
+    "decision_rule": "配置図座標系へ投影してsite electrical entity生成",
+    "output_fields_json": [
+      "site_electrical_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "電気",
+      "土木"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "site_electrical",
+      "site_plan"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "配置整合率",
+    "escalation_trigger": "座標基準不一致",
+    "example_terms_json": [
+      "外灯",
+      "HH"
+    ],
+    "normalization_rule": "site coordinateへ正規化",
+    "priority": "P1",
+    "reference_group": "電気設備図"
+  },
+  {
+    "knowledge_id": "K036",
+    "category_l1": "機械設備図",
+    "category_l2": "配管・ダクト・機器",
+    "knowledge_name": "空調機器・ダクト抽出",
+    "purpose": "機器・ダクト・風量を取る",
+    "what_to_detect": "機器記号、ダクトサイズ、風量、系統",
+    "input_signals_json": [
+      "空調平面図",
+      "ダクト系統図",
+      "機器表"
+    ],
+    "decision_rule": "機器記号→機器表→系統図で結合",
+    "output_fields_json": [
+      "hvac_equipment_entities",
+      "duct_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "機械"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "hvac_plan",
+      "duct_riser",
+      "equipment_schedule"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "機器表結合率",
+    "escalation_trigger": "略号多義・機器表別冊",
+    "example_terms_json": [
+      "AHU-1",
+      "500x300"
+    ],
+    "normalization_rule": "duct sizeをW/H or diaに正規化",
+    "priority": "P0",
+    "reference_group": "機械設備図"
+  },
+  {
+    "knowledge_id": "K037",
+    "category_l1": "機械設備図",
+    "category_l2": "配管・ダクト・機器",
+    "knowledge_name": "給排水・通気配管抽出",
+    "purpose": "配管数量・系統・口径を取る",
+    "what_to_detect": "管種、口径、勾配、立管/枝管",
+    "input_signals_json": [
+      "給排水平面図",
+      "配管系統図"
+    ],
+    "decision_rule": "平面の配管線と系統図の番号を結合",
+    "output_fields_json": [
+      "pipe_entities",
+      "plumbing_systems"
+    ],
+    "applies_to_disciplines_json": [
+      "機械"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "water_supply_plan",
+      "drain_vent_plan",
+      "piping_riser"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "配管系統結合率",
+    "escalation_trigger": "配管線密集・交差",
+    "example_terms_json": [
+      "VP100",
+      "1/100"
+    ],
+    "normalization_rule": "diameter_mmまたはA呼称を標準化",
+    "priority": "P0",
+    "reference_group": "機械設備図"
+  },
+  {
+    "knowledge_id": "K038",
+    "category_l1": "機械設備図",
+    "category_l2": "配管・ダクト・機器",
+    "knowledge_name": "衛生器具抽出",
+    "purpose": "器具数量・接続系統を取る",
+    "what_to_detect": "便器、洗面器、流し、給排水接続",
+    "input_signals_json": [
+      "衛生器具図",
+      "器具表"
+    ],
+    "decision_rule": "器具形状と器具番号を結合してentity化",
+    "output_fields_json": [
+      "sanitary_fixture_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "機械"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "sanitary_fixture_plan",
+      "equipment_schedule"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "器具記号一致率",
+    "escalation_trigger": "図形類似",
+    "example_terms_json": [
+      "洋風便器",
+      "洗面器"
+    ],
+    "normalization_rule": "fixture_family標準化",
+    "priority": "P1",
+    "reference_group": "機械設備図"
+  },
+  {
+    "knowledge_id": "K039",
+    "category_l1": "機械設備図",
+    "category_l2": "配管・ダクト・機器",
+    "knowledge_name": "消火設備抽出",
+    "purpose": "SP・消火栓・配管を読む",
+    "what_to_detect": "ヘッド、消火栓、配管口径",
+    "input_signals_json": [
+      "消火設備図",
+      "系統図"
+    ],
+    "decision_rule": "機器・配管・制御をfire_protection systemへ整理",
+    "output_fields_json": [
+      "fire_protection_entities"
+    ],
+    "applies_to_disciplines_json": [
+      "機械"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "fire_fighting_plan",
+      "piping_riser"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "機器と配管の関係抽出率",
+    "escalation_trigger": "機械/電気またがり記号",
+    "example_terms_json": [
+      "SP",
+      "屋内消火栓"
+    ],
+    "normalization_rule": "system_family=fire_protection",
+    "priority": "P1",
+    "reference_group": "機械設備図"
+  },
+  {
+    "knowledge_id": "K040",
+    "category_l1": "機械設備図",
+    "category_l2": "配管・ダクト・機器",
+    "knowledge_name": "機器能力・仕様抽出",
+    "purpose": "機器表から能力・電源を取る",
+    "what_to_detect": "能力、風量、静圧、電源、型式",
+    "input_signals_json": [
+      "機器表"
+    ],
+    "decision_rule": "列見出しを標準項目へ写像",
+    "output_fields_json": [
+      "equipment_spec_rows"
+    ],
+    "applies_to_disciplines_json": [
+      "機械",
+      "電気"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "equipment_schedule"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "列見出し正規化率",
+    "escalation_trigger": "結合セル・略号列",
+    "example_terms_json": [
+      "能力",
+      "電源",
+      "型式"
+    ],
+    "normalization_rule": "spec columnsをcanonical keysへ",
+    "priority": "P1",
+    "reference_group": "機械設備図"
+  },
+  {
+    "knowledge_id": "K041",
+    "category_l1": "土木・道路・造成図",
+    "category_l2": "線形・排水・舗装",
+    "knowledge_name": "道路平面図抽出",
+    "purpose": "線形・測点・幅員を読む",
+    "what_to_detect": "測点、中心線、幅員、構造物位置",
+    "input_signals_json": [
+      "道路平面図",
+      "注記"
+    ],
+    "decision_rule": "測点軸と構造物・幅員注記を紐付ける",
+    "output_fields_json": [
+      "road_alignment",
+      "road_features"
+    ],
+    "applies_to_disciplines_json": [
+      "土木"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "road_plan"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "測点読取率",
+    "escalation_trigger": "測点欠落・多ルート",
+    "example_terms_json": [
+      "No.10",
+      "幅員7.0"
+    ],
+    "normalization_rule": "station_noを連番正規化",
+    "priority": "P0",
+    "reference_group": "道路・造成図"
+  },
+  {
+    "knowledge_id": "K042",
+    "category_l1": "土木・道路・造成図",
+    "category_l2": "線形・排水・舗装",
+    "knowledge_name": "縦断面図抽出",
+    "purpose": "現況高・計画高・勾配を読む",
+    "what_to_detect": "GH,FH,DL,勾配,縦曲線",
+    "input_signals_json": [
+      "縦断図",
+      "表"
+    ],
+    "decision_rule": "測点ごとの高低と勾配をprofile table化",
+    "output_fields_json": [
+      "profile_rows"
+    ],
+    "applies_to_disciplines_json": [
+      "土木"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "road_profile"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "測点-高さ対応率",
+    "escalation_trigger": "表と図の分離失敗",
+    "example_terms_json": [
+      "GH",
+      "FH",
+      "i=0.5%"
+    ],
+    "normalization_rule": "elevation_mに正規化",
+    "priority": "P0",
+    "reference_group": "道路・造成図"
+  },
+  {
+    "knowledge_id": "K043",
+    "category_l1": "土木・道路・造成図",
+    "category_l2": "線形・排水・舗装",
+    "knowledge_name": "横断面図抽出",
+    "purpose": "切盛・法面・幅構成を読む",
+    "what_to_detect": "路肩、車道、法面、擁壁",
+    "input_signals_json": [
+      "横断面図"
+    ],
+    "decision_rule": "測点単位で地山線/計画線/構造物を分離",
+    "output_fields_json": [
+      "cross_section_rows"
+    ],
+    "applies_to_disciplines_json": [
+      "土木"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "standard_cross_section",
+      "cross_section"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "断面線追跡率",
+    "escalation_trigger": "現況/計画線混同",
+    "example_terms_json": [
+      "法面1:1.5",
+      "路肩0.5"
+    ],
+    "normalization_rule": "section components標準化",
+    "priority": "P1",
+    "reference_group": "道路・造成図"
+  },
+  {
+    "knowledge_id": "K044",
+    "category_l1": "土木・道路・造成図",
+    "category_l2": "線形・排水・舗装",
+    "knowledge_name": "排水施設抽出",
+    "purpose": "側溝・桝・管径・勾配を読む",
+    "what_to_detect": "側溝規格、桝、管口径、インバート高",
+    "input_signals_json": [
+      "排水施設図",
+      "縦断図"
+    ],
+    "decision_rule": "排水系統としてnode/edge構造化",
+    "output_fields_json": [
+      "drainage_nodes",
+      "drainage_edges"
+    ],
+    "applies_to_disciplines_json": [
+      "土木"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "site_drainage_plan"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "ノード-エッジ結合率",
+    "escalation_trigger": "逆勾配・インバート高欠落",
+    "example_terms_json": [
+      "U字溝",
+      "集水桝",
+      "VU150"
+    ],
+    "normalization_rule": "drainage graphへ正規化",
+    "priority": "P0",
+    "reference_group": "道路・造成図"
+  },
+  {
+    "knowledge_id": "K045",
+    "category_l1": "土木・道路・造成図",
+    "category_l2": "線形・排水・舗装",
+    "knowledge_name": "舗装構成抽出",
+    "purpose": "表層・基層・路盤を読む",
+    "what_to_detect": "層名、材質、厚さ",
+    "input_signals_json": [
+      "舗装構成図",
+      "標準断面"
+    ],
+    "decision_rule": "上層から順にlayer list化",
+    "output_fields_json": [
+      "pavement_layers"
+    ],
+    "applies_to_disciplines_json": [
+      "土木",
+      "外構"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "pavement_section",
+      "standard_cross_section"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "層順抽出率",
+    "escalation_trigger": "厚さ注記不足",
+    "example_terms_json": [
+      "表層50",
+      "路盤150"
+    ],
+    "normalization_rule": "layer_orderを0..nで保持",
+    "priority": "P0",
+    "reference_group": "道路・造成図"
+  },
+  {
+    "knowledge_id": "K046",
+    "category_l1": "土木・道路・造成図",
+    "category_l2": "線形・排水・舗装",
+    "knowledge_name": "造成・法面・擁壁抽出",
+    "purpose": "切盛土と構造物を読む",
+    "what_to_detect": "切土盛土、法肩法尻、擁壁形式",
+    "input_signals_json": [
+      "造成計画図",
+      "擁壁詳細図"
+    ],
+    "decision_rule": "earthwork zoneとretaining structureを分けて管理",
+    "output_fields_json": [
+      "earthwork_zones",
+      "retaining_structures"
+    ],
+    "applies_to_disciplines_json": [
+      "土木"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "earthwork_plan",
+      "retaining_structure"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "ゾーン抽出率",
+    "escalation_trigger": "地盤線交差・複合擁壁",
+    "example_terms_json": [
+      "切土",
+      "L型擁壁"
+    ],
+    "normalization_rule": "zone_id / structure_id付与",
+    "priority": "P1",
+    "reference_group": "道路・造成図"
+  },
+  {
+    "knowledge_id": "K047",
+    "category_l1": "改修・仮設",
+    "category_l2": "状態・施工制約",
+    "knowledge_name": "既存/撤去/新設の識別",
+    "purpose": "改修図の読取り前提を整える",
+    "what_to_detect": "既存、撤去、新設、復旧の表現",
+    "input_signals_json": [
+      "色分け",
+      "線種",
+      "凡例",
+      "注記"
+    ],
+    "decision_rule": "凡例優先でstate_flagをexisting/demolish/new/restoreに割当",
+    "output_fields_json": [
+      "state_flags"
+    ],
+    "applies_to_disciplines_json": [
+      "建築",
+      "設備",
+      "電気",
+      "機械"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "凡例一致必須寄り",
+    "escalation_trigger": "凡例欠落・色劣化スキャン",
+    "example_terms_json": [
+      "既存",
+      "撤去",
+      "新設"
+    ],
+    "normalization_rule": "state_flag標準化",
+    "priority": "P0",
+    "reference_group": "改修図"
+  },
+  {
+    "knowledge_id": "K048",
+    "category_l1": "改修・仮設",
+    "category_l2": "状態・施工制約",
+    "knowledge_name": "関連既存設備の系統参照",
+    "purpose": "改修範囲外既存影響を読む",
+    "what_to_detect": "既存系統図、接続先、切替点",
+    "input_signals_json": [
+      "改修図",
+      "既存系統図"
+    ],
+    "decision_rule": "改修対象が既存系統にどう接続するかをrelation化",
+    "output_fields_json": [
+      "existing_to_new_links"
+    ],
+    "applies_to_disciplines_json": [
+      "電気",
+      "機械"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "link",
+    "confidence_rule": "接続先抽出率",
+    "escalation_trigger": "既存図別冊・参照先欠落",
+    "example_terms_json": [
+      "既設盤",
+      "既設立管"
+    ],
+    "normalization_rule": "link_type=existing_connection",
+    "priority": "P1",
+    "reference_group": "改修図"
+  },
+  {
+    "knowledge_id": "K049",
+    "category_l1": "改修・仮設",
+    "category_l2": "状態・施工制約",
+    "knowledge_name": "仮設計画解釈",
+    "purpose": "工事中制約・養生・搬入動線を読む",
+    "what_to_detect": "仮囲い、ゲート、資材置場、搬入路",
+    "input_signals_json": [
+      "仮設計画図",
+      "配置図"
+    ],
+    "decision_rule": "施工制約として別レイヤに保持",
+    "output_fields_json": [
+      "temporary_constraints"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "temporary_works_plan",
+      "site_plan"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "制約項目抽出率",
+    "escalation_trigger": "注記中心で図形薄い",
+    "example_terms_json": [
+      "仮囲い",
+      "搬入路"
+    ],
+    "normalization_rule": "constraint_type標準化",
+    "priority": "P1",
+    "reference_group": "仮設計画"
+  },
+  {
+    "knowledge_id": "K050",
+    "category_l1": "凡例・略号・材料辞書",
+    "category_l2": "辞書優先順位",
+    "knowledge_name": "凡例優先の記号解釈",
+    "purpose": "標準辞書より図面固有定義を優先する",
+    "what_to_detect": "凡例内の記号と説明文",
+    "input_signals_json": [
+      "凡例領域",
+      "記号"
+    ],
+    "decision_rule": "凡例定義がある場合は必ず凡例を優先し、標準辞書はfallbackとする",
+    "output_fields_json": [
+      "legend_dictionary"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "凡例抽出率",
+    "escalation_trigger": "凡例読取不能",
+    "example_terms_json": [
+      "凡例",
+      "記号一覧"
+    ],
+    "normalization_rule": "source=legend/standardを保持",
+    "priority": "P0",
+    "reference_group": "記号辞書"
+  },
+  {
+    "knowledge_id": "K051",
+    "category_l1": "凡例・略号・材料辞書",
+    "category_l2": "辞書優先順位",
+    "knowledge_name": "略号辞書正規化",
+    "purpose": "短い略号を意味付き属性へ変換する",
+    "what_to_detect": "BM,GL,PS,EPS,AHU等",
+    "input_signals_json": [
+      "テキストトークン",
+      "略号辞書"
+    ],
+    "decision_rule": "完全一致優先、文脈で多義語解消",
+    "output_fields_json": [
+      "normalized_terms"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "辞書一致率",
+    "escalation_trigger": "多義語 R/L 等",
+    "example_terms_json": [
+      "GL",
+      "AHU",
+      "PS"
+    ],
+    "normalization_rule": "abbreviation -> canonical_label",
+    "priority": "P0",
+    "reference_group": "略号辞書"
+  },
+  {
+    "knowledge_id": "K052",
+    "category_l1": "凡例・略号・材料辞書",
+    "category_l2": "辞書優先順位",
+    "knowledge_name": "材料・工法コード正規化",
+    "purpose": "仕様・数量・見積へつなげる",
+    "what_to_detect": "ALC,ECP,GB-R,SOP,VP等",
+    "input_signals_json": [
+      "注記",
+      "表"
+    ],
+    "decision_rule": "材料コード辞書で正規化。未登録は保留。",
+    "output_fields_json": [
+      "material_codes"
+    ],
+    "applies_to_disciplines_json": [
+      "建築",
+      "設備",
+      "塗装"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image",
+      "cad"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "材料辞書一致率",
+    "escalation_trigger": "メーカー固有略号",
+    "example_terms_json": [
+      "ALC",
+      "VP",
+      "SOP"
+    ],
+    "normalization_rule": "canonical_material_code付与",
+    "priority": "P1",
+    "reference_group": "材料辞書"
+  },
+  {
+    "knowledge_id": "K053",
+    "category_l1": "凡例・略号・材料辞書",
+    "category_l2": "辞書優先順位",
+    "knowledge_name": "表記ゆれ統一",
+    "purpose": "同じ対象を同じキーへ寄せる",
+    "what_to_detect": "全角半角、ハイフン、長音、英字大小",
+    "input_signals_json": [
+      "生文字列"
+    ],
+    "decision_rule": "比較前に文字正規化(NFKC,大文字化,記号統一)を行う",
+    "output_fields_json": [
+      "normalized_text"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "preprocess",
+    "confidence_rule": "正規化後の一致率",
+    "escalation_trigger": "意図的な別表記",
+    "example_terms_json": [
+      "φ100",
+      "Φ100",
+      "100A"
+    ],
+    "normalization_rule": "normalization pipelineを固定",
+    "priority": "P0",
+    "reference_group": "辞書運用"
+  },
+  {
+    "knowledge_id": "K054",
+    "category_l1": "仕様・優先順位",
+    "category_l2": "解釈",
+    "knowledge_name": "図面単独完結を前提にしない",
+    "purpose": "仕様省略を補う",
+    "what_to_detect": "標準仕様書、特記仕様書、図面の関係",
+    "input_signals_json": [
+      "図面注記",
+      "特記参照"
+    ],
+    "decision_rule": "図面に無い標準事項はspec_missingとして扱い、仕様解決フェーズへ送る",
+    "output_fields_json": [
+      "spec_gap_flags"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "spec参照の有無",
+    "escalation_trigger": "仕様が図面に無い",
+    "example_terms_json": [
+      "特記による",
+      "標準仕様書"
+    ],
+    "normalization_rule": "spec_gap=true/false",
+    "priority": "P0",
+    "reference_group": "仕様優先順位"
+  },
+  {
+    "knowledge_id": "K055",
+    "category_l1": "仕様・優先順位",
+    "category_l2": "解釈",
+    "knowledge_name": "設計図書の優先順位解釈",
+    "purpose": "矛盾時の採用順位を固定",
+    "what_to_detect": "質問回答書、現場説明書、特記、図面、標準仕様",
+    "input_signals_json": [
+      "文書種別",
+      "改訂情報"
+    ],
+    "decision_rule": "優先順位順に上位を採用し差異を記録",
+    "output_fields_json": [
+      "resolved_spec_source",
+      "conflict_log"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "文書種別確定度",
+    "escalation_trigger": "上位文書未入手",
+    "example_terms_json": [
+      "特記仕様",
+      "標準仕様"
+    ],
+    "normalization_rule": "priority_rankを付与",
+    "priority": "P0",
+    "reference_group": "仕様優先順位"
+  },
+  {
+    "knowledge_id": "K056",
+    "category_l1": "仕様・優先順位",
+    "category_l2": "解釈",
+    "knowledge_name": "メーカー・型番未記載前提",
+    "purpose": "一般仕様中心の読取りに寄せる",
+    "what_to_detect": "型番欄の有無、一般名称",
+    "input_signals_json": [
+      "機器表",
+      "注記"
+    ],
+    "decision_rule": "型番欠落でも一般仕様属性でentityを構成",
+    "output_fields_json": [
+      "generic_spec_attributes"
+    ],
+    "applies_to_disciplines_json": [
+      "機械",
+      "電気",
+      "建築"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "equipment_schedule",
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "一般仕様列抽出率",
+    "escalation_trigger": "型番必須案件",
+    "example_terms_json": [
+      "能力",
+      "材質",
+      "寸法"
+    ],
+    "normalization_rule": "generic spec schemaへ格納",
+    "priority": "P1",
+    "reference_group": "仕様優先順位"
+  },
+  {
+    "knowledge_id": "K057",
+    "category_l1": "図面間整合",
+    "category_l2": "リンク",
+    "knowledge_name": "通り芯・階・室での横断リンク",
+    "purpose": "複数図面を一つの空間モデルへ束ねる",
+    "what_to_detect": "通り芯、階、室名、部屋番号",
+    "input_signals_json": [
+      "平面図",
+      "展開図",
+      "設備図"
+    ],
+    "decision_rule": "space_key = 建物/階/室/通り芯で統合",
+    "output_fields_json": [
+      "space_keys"
+    ],
+    "applies_to_disciplines_json": [
+      "建築",
+      "設備",
+      "電気",
+      "機械"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "link",
+    "confidence_rule": "空間キー一致率",
+    "escalation_trigger": "室名ゆれ・住戸繰返し",
+    "example_terms_json": [
+      "A通り-3通り",
+      "101号室"
+    ],
+    "normalization_rule": "space_key生成",
+    "priority": "P0",
+    "reference_group": "図面間整合"
+  },
+  {
+    "knowledge_id": "K058",
+    "category_l1": "図面間整合",
+    "category_l2": "リンク",
+    "knowledge_name": "部材符号と部材表のリンク",
+    "purpose": "表と図形を統合する",
+    "what_to_detect": "符号タグ、表行、詳細番号",
+    "input_signals_json": [
+      "符号",
+      "表"
+    ],
+    "decision_rule": "entity_id = sheet/floor/symbol_code",
+    "output_fields_json": [
+      "entity_links"
+    ],
+    "applies_to_disciplines_json": [
+      "構造",
+      "建築"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "link",
+    "confidence_rule": "符号一致率",
+    "escalation_trigger": "同符号複数用途",
+    "example_terms_json": [
+      "C1",
+      "D-1"
+    ],
+    "normalization_rule": "entity_id正規化",
+    "priority": "P0",
+    "reference_group": "図面間整合"
+  },
+  {
+    "knowledge_id": "K059",
+    "category_l1": "図面間整合",
+    "category_l2": "リンク",
+    "knowledge_name": "設備平面図と系統図のリンク",
+    "purpose": "平面位置と系統関係を統合する",
+    "what_to_detect": "機器番号、立管番号、系統名",
+    "input_signals_json": [
+      "平面図",
+      "系統図",
+      "機器表"
+    ],
+    "decision_rule": "番号優先でgraph化。位置不明はabstract entityとして保持",
+    "output_fields_json": [
+      "system_graph"
+    ],
+    "applies_to_disciplines_json": [
+      "電気",
+      "機械"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "link",
+    "confidence_rule": "番号一致率",
+    "escalation_trigger": "平面図無番・系統図別名",
+    "example_terms_json": [
+      "R-1",
+      "AHU-1"
+    ],
+    "normalization_rule": "graph node/edge schemaへ",
+    "priority": "P0",
+    "reference_group": "図面間整合"
+  },
+  {
+    "knowledge_id": "K060",
+    "category_l1": "図面間整合",
+    "category_l2": "リンク",
+    "knowledge_name": "詳細参照リンク",
+    "purpose": "平面・立面・断面・詳細を関連付ける",
+    "what_to_detect": "詳細番号、参照図番号",
+    "input_signals_json": [
+      "吹出し",
+      "詳細図タイトル"
+    ],
+    "decision_rule": "detail_refが一致すればparent-child relation生成",
+    "output_fields_json": [
+      "detail_links"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "link",
+    "confidence_rule": "参照先一致率",
+    "escalation_trigger": "参照図未読込",
+    "example_terms_json": [
+      "詳細1/A-101"
+    ],
+    "normalization_rule": "parent_sheet_id/child_sheet_id設定",
+    "priority": "P1",
+    "reference_group": "図面間整合"
+  },
+  {
+    "knowledge_id": "K061",
+    "category_l1": "OCR/CV処理",
+    "category_l2": "抽出エンジン",
+    "knowledge_name": "縦書き・回転文字対応",
+    "purpose": "表題欄・縦断図・列見出しで文字欠落を防ぐ",
+    "what_to_detect": "90度文字、縦書き列、回転注記",
+    "input_signals_json": [
+      "OCRボックス",
+      "文字方向"
+    ],
+    "decision_rule": "方向別OCRを走らせ最良結果採用",
+    "output_fields_json": [
+      "ocr_text_blocks"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "image",
+      "pdf"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "方向別confidence比較",
+    "escalation_trigger": "縦横混在の結合失敗",
+    "example_terms_json": [
+      "縦書き",
+      "90°"
+    ],
+    "normalization_rule": "text_direction属性保持",
+    "priority": "P0",
+    "reference_group": "OCR実装"
+  },
+  {
+    "knowledge_id": "K062",
+    "category_l1": "OCR/CV処理",
+    "category_l2": "抽出エンジン",
+    "knowledge_name": "表セル再構成",
+    "purpose": "結合セルや罫線欠落表を読む",
+    "what_to_detect": "セル境界、見出し階層、列幅",
+    "input_signals_json": [
+      "表領域",
+      "文字座標"
+    ],
+    "decision_rule": "罫線優先。罫線欠落時は整列クラスタリングで補完",
+    "output_fields_json": [
+      "table_cells",
+      "header_hierarchy"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "セル整合率",
+    "escalation_trigger": "結合セル多・折返し",
+    "example_terms_json": [
+      "建具表",
+      "機器表"
+    ],
+    "normalization_rule": "row/col index付与",
+    "priority": "P0",
+    "reference_group": "OCR実装"
+  },
+  {
+    "knowledge_id": "K063",
+    "category_l1": "OCR/CV処理",
+    "category_l2": "抽出エンジン",
+    "knowledge_name": "寸法線と数値の紐付け",
+    "purpose": "数量化可能な寸法を読む",
+    "what_to_detect": "寸法線、寸法数値、補助線",
+    "input_signals_json": [
+      "線分",
+      "数値"
+    ],
+    "decision_rule": "数値ボックスを最寄寸法線へ紐付ける",
+    "output_fields_json": [
+      "dimension_objects"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "extract",
+    "confidence_rule": "寸法紐付け率",
+    "escalation_trigger": "寸法密集・重なり",
+    "example_terms_json": [
+      "3000",
+      "150"
+    ],
+    "normalization_rule": "measurement object化",
+    "priority": "P0",
+    "reference_group": "OCR実装"
+  },
+  {
+    "knowledge_id": "K064",
+    "category_l1": "OCR/CV処理",
+    "category_l2": "抽出エンジン",
+    "knowledge_name": "記号検出と凡例マッチ",
+    "purpose": "非文字記号を読む",
+    "what_to_detect": "シンボル画像、凡例の記号一覧",
+    "input_signals_json": [
+      "シンボル候補",
+      "凡例辞書"
+    ],
+    "decision_rule": "凡例内パターン優先でテンプレート照合",
+    "output_fields_json": [
+      "symbol_matches"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "pdf",
+      "image"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "resolve",
+    "confidence_rule": "match_score>=0.8",
+    "escalation_trigger": "凡例なし・類似記号",
+    "example_terms_json": [
+      "照明器具",
+      "スイッチ"
+    ],
+    "normalization_rule": "symbol_id付与",
+    "priority": "P0",
+    "reference_group": "OCR実装"
+  },
+  {
+    "knowledge_id": "K065",
+    "category_l1": "OCR/CV処理",
+    "category_l2": "抽出エンジン",
+    "knowledge_name": "低信頼抽出の隔離",
+    "purpose": "誤確定を防ぐ",
+    "what_to_detect": "confidence score, conflict flags",
+    "input_signals_json": [
+      "抽出結果",
+      "confidence"
+    ],
+    "decision_rule": "閾値未満はauto-finalizeせずreview queueへ送る",
+    "output_fields_json": [
+      "review_queue_items"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "qa",
+    "confidence_rule": "confidence<0.75で要確認",
+    "escalation_trigger": "重要フィールド欠落",
+    "example_terms_json": [
+      "縮尺未読",
+      "図面番号低信頼"
+    ],
+    "normalization_rule": "status=needs_review",
+    "priority": "P0",
+    "reference_group": "OCR実装"
+  },
+  {
+    "knowledge_id": "K066",
+    "category_l1": "QA・例外処理",
+    "category_l2": "レビュー",
+    "knowledge_name": "未登録記号の保留",
+    "purpose": "未知記号を誤分類しない",
+    "what_to_detect": "凡例未一致・標準辞書未一致の記号",
+    "input_signals_json": [
+      "symbol_matches",
+      "legend_dictionary"
+    ],
+    "decision_rule": "unknown symbolとして保存し人確認へ",
+    "output_fields_json": [
+      "unknown_symbols"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "qa",
+    "confidence_rule": "unknown率監視",
+    "escalation_trigger": "重要設備記号がunknown",
+    "example_terms_json": [
+      "?",
+      "未登録"
+    ],
+    "normalization_rule": "status=unknown_symbol",
+    "priority": "P0",
+    "reference_group": "品質保証"
+  },
+  {
+    "knowledge_id": "K067",
+    "category_l1": "QA・例外処理",
+    "category_l2": "レビュー",
+    "knowledge_name": "図面間矛盾の検出",
+    "purpose": "平面・表・系統図の不整合を出す",
+    "what_to_detect": "数量差、番号差、位置差",
+    "input_signals_json": [
+      "linked_entities"
+    ],
+    "decision_rule": "同一entityで属性差異があればconflict生成",
+    "output_fields_json": [
+      "conflicts"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "qa",
+    "confidence_rule": "conflict countで評価",
+    "escalation_trigger": "盤番号不一致・器具数不一致",
+    "example_terms_json": [
+      "AHU-1能力差",
+      "D-1寸法差"
+    ],
+    "normalization_rule": "conflict_type分類",
+    "priority": "P0",
+    "reference_group": "品質保証"
+  },
+  {
+    "knowledge_id": "K068",
+    "category_l1": "QA・例外処理",
+    "category_l2": "レビュー",
+    "knowledge_name": "必須フィールド充足確認",
+    "purpose": "最低限使える抽出結果を保証する",
+    "what_to_detect": "図面番号、図面名、縮尺、分野、シート種別",
+    "input_signals_json": [
+      "sheet_metadata"
+    ],
+    "decision_rule": "必須キー不足時はsheet incomplete",
+    "output_fields_json": [
+      "sheet_status"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "qa",
+    "confidence_rule": "5大必須項目の充足率",
+    "escalation_trigger": "図面番号欠落",
+    "example_terms_json": [
+      "図面番号",
+      "縮尺"
+    ],
+    "normalization_rule": "status=complete/incomplete",
+    "priority": "P0",
+    "reference_group": "品質保証"
+  },
+  {
+    "knowledge_id": "K069",
+    "category_l1": "QA・例外処理",
+    "category_l2": "レビュー",
+    "knowledge_name": "監査ログ保持",
+    "purpose": "再現性を確保する",
+    "what_to_detect": "使った辞書、採用ルール、confidence, override",
+    "input_signals_json": [
+      "すべての処理ログ"
+    ],
+    "decision_rule": "各決定にrule_idとsourceを残す",
+    "output_fields_json": [
+      "audit_log"
+    ],
+    "applies_to_disciplines_json": [
+      "共通"
+    ],
+    "applies_to_media_json": [
+      "all"
+    ],
+    "applies_to_sheet_types_json": [
+      "all"
+    ],
+    "pipeline_stage": "qa",
+    "confidence_rule": "ログ欠落率0を目標",
+    "escalation_trigger": "手修正の出所不明",
+    "example_terms_json": [
+      "rule_id",
+      "source"
+    ],
+    "normalization_rule": "decision trace標準化",
+    "priority": "P1",
+    "reference_group": "品質保証"
+  }
+]

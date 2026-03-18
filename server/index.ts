@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { createAppStateApiMiddleware } from "./appStateApi";
 import { createConsensusApiMiddleware } from "./consensusApi";
 import { createMasterApiMiddleware } from "./masterApi";
+import { createOcrPackApiMiddleware } from "./ocrPackApi";
 import { createReportApiMiddleware } from "./reportApi";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -57,6 +58,7 @@ async function startServer() {
   });
 
   app.use(createConsensusApiMiddleware());
+  app.use(createOcrPackApiMiddleware());
   app.use(createMasterApiMiddleware());
   app.use(createReportApiMiddleware());
   app.use(createAppStateApiMiddleware());

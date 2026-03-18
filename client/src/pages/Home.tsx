@@ -21,6 +21,7 @@ import {
   type EstimateBlock,
   type GeneratedReportBundle,
   type MasterType,
+  type OcrReviewQueueItem,
   type ParseDrawingResponse,
   type PriceMasterItem,
   type Project,
@@ -83,6 +84,30 @@ function ProjectCard({ project, isActive, onSelect }: { project: Project; isActi
   );
 }
 
+function ReviewQueueBadge({ item }: { item: OcrReviewQueueItem }) {
+  const tone = item.severity === 'critical'
+    ? 'border-rose-200 bg-rose-50 text-rose-800'
+    : item.severity === 'warning'
+      ? 'border-amber-200 bg-amber-50 text-amber-800'
+      : 'border-slate-200 bg-slate-50 text-slate-700';
+
+  return (
+    <div className={`rounded-md border px-3 py-2 ${tone}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-[0.16em]">{item.queue}</div>
+        <div className="text-[11px] font-semibold uppercase">{item.severity}</div>
+      </div>
+      <div className="mt-1 text-sm font-semibold">{item.title}</div>
+      <div className="mt-1 text-xs leading-5">{item.detail}</div>
+      {(item.sourceText || item.sourcePage) && (
+        <div className="mt-2 text-[11px] leading-5 opacity-80">
+          {item.sourcePage ? `p.${item.sourcePage}` : ''}{item.sourcePage && item.sourceText ? ' / ' : ''}{item.sourceText ?? ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function updateProjectCollection(projects: Project[], projectId: string, updater: (project: Project) => Project): Project[] {
   return projects.map((project) => (project.id === projectId ? updater(project) : project));
 }
@@ -138,9 +163,9 @@ function buildDrawingFromParseResponse(
     id: crypto.randomUUID(),
     projectId,
     name: file.name,
-    drawingNo: '',
-    drawingTitle: file.name,
-    revision: 'A',
+    drawingNo: payload.titleBlock?.drawingNo ?? '',
+    drawingTitle: payload.titleBlock?.drawingTitle || file.name,
+    revision: payload.titleBlock?.revision ?? 'A',
     fileName: payload.drawingSource.fileName || file.name,
     fileType: payload.drawingSource.fileType,
     status: 'ready',
@@ -160,6 +185,11 @@ function buildDrawingFromParseResponse(
       box: item.box,
     })),
     aiCandidates,
+    mediaRoute: payload.mediaRoute,
+    titleBlockMeta: payload.titleBlock,
+    sheetClassification: payload.sheetClassification,
+    resolvedUnits: payload.resolvedUnits,
+    legendResolution: payload.legendResolution,
     workTypeCandidates: (payload.workTypeCandidates || []).map((candidate) => ({
       id: crypto.randomUUID(),
       blockType: candidate.blockType,
@@ -168,6 +198,16 @@ function buildDrawingFromParseResponse(
       reason: candidate.reason,
       sourceTexts: candidate.sourceTexts,
       requiresReview: candidate.requiresReview,
+    })),
+    reviewQueue: (payload.reviewQueue || []).map((item) => ({
+      id: crypto.randomUUID(),
+      queue: item.queue,
+      severity: item.severity,
+      title: item.title,
+      detail: item.detail,
+      sourceText: item.sourceText,
+      sourcePage: item.sourcePage,
+      fieldName: item.fieldName,
     })),
     uploadedAt: new Date().toISOString(),
     lastParsedAt: new Date().toISOString(),
@@ -307,6 +347,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const effectiveDate = new Date().toISOString().slice(0, 10);
   const uploadDisabledReason = isAiApiAvailable() ? null : getAiApiUnavailableMessage();
   const result = useMemo(() => (activeBlock ? calculate(activeBlock, { masters, effectiveDate }) : null), [activeBlock, effectiveDate, masters]);
+  const activeReviewQueue = activeDrawing?.reviewQueue ?? [];
 
   useEffect(() => {
     if (!activeProject || !activeBlock) {
@@ -701,6 +742,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
                 <div>工種: <span className="font-semibold text-slate-900">{getWorkTypeLabel(activeBlock.blockType)}</span></div>
                 <div className="mt-1">紐づく図面: <span className="font-semibold text-slate-900">{activeDrawing?.drawingTitle || '未選択'}</span></div>
                 <div className="mt-1">反映済み候補: <span className="font-semibold text-slate-900">{activeBlock.appliedCandidateIds.length} 件</span></div>
+                <div className="mt-1">OCR review queue: <span className="font-semibold text-slate-900">{activeReviewQueue.length} 件</span></div>
               </div>
               {activeBlock.requiresReviewFields.length > 0 ? (
                 <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -711,6 +753,30 @@ export default function Home({ preferredBlockType }: HomeProps) {
                   現在、要確認で停止している項目はありません。
                 </div>
               )}
+
+              {activeDrawing?.mediaRoute && (
+                <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+                  <div className="font-semibold text-slate-800">OCR pack 判定</div>
+                  <div className="mt-2">媒体: <span className="font-semibold text-slate-900">{activeDrawing.mediaRoute.sourceMediaType}</span></div>
+                  <div className="mt-1">処理経路: <span className="font-semibold text-slate-900">{activeDrawing.mediaRoute.preferredPipeline}</span></div>
+                  <div className="mt-1">シート分類: <span className="font-semibold text-slate-900">{activeDrawing.sheetClassification?.sheetTypeName ?? '未分類'}</span></div>
+                  <div className="mt-1">分野: <span className="font-semibold text-slate-900">{activeDrawing.titleBlockMeta?.discipline ?? activeDrawing.sheetClassification?.discipline ?? 'unknown'}</span></div>
+                  <div className="mt-1">単位: <span className="font-semibold text-slate-900">{activeDrawing.resolvedUnits?.lengthUnit ?? 'unknown'}</span></div>
+                </div>
+              )}
+
+              <div className="mt-3 rounded-lg border border-slate-200 bg-white">
+                <div className="border-b border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800">OCR pack review queue</div>
+                <div className="space-y-2 p-3">
+                  {activeReviewQueue.length === 0 ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                      OCR pack 起点での追加レビュー項目はありません。
+                    </div>
+                  ) : (
+                    activeReviewQueue.slice(0, 6).map((item) => <ReviewQueueBadge key={item.id} item={item} />)
+                  )}
+                </div>
+              </div>
             </div>
 
             <CalculationResults result={result} block={activeBlock} />

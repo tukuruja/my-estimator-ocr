@@ -1,0 +1,920 @@
+[
+  {
+    "sheet_type_id": "SHT_001",
+    "discipline": "共通",
+    "sheet_type_name": "表紙",
+    "canonical_key": "project_cover",
+    "description": "図面集全体の表紙。案件名・図面リスト参照起点。",
+    "key_fields_json": [
+      "案件名",
+      "工事名",
+      "発注者",
+      "図面集名"
+    ],
+    "keywords_json": [
+      "図面集",
+      "表紙"
+    ],
+    "main_phase": "metadata"
+  },
+  {
+    "sheet_type_id": "SHT_002",
+    "discipline": "共通",
+    "sheet_type_name": "図面目録",
+    "canonical_key": "drawing_index",
+    "description": "図面番号と図面名の一覧。",
+    "key_fields_json": [
+      "図面番号",
+      "図面名称",
+      "改訂"
+    ],
+    "keywords_json": [
+      "目録",
+      "一覧"
+    ],
+    "main_phase": "metadata"
+  },
+  {
+    "sheet_type_id": "SHT_003",
+    "discipline": "共通",
+    "sheet_type_name": "特記仕様参照図",
+    "canonical_key": "spec_reference",
+    "description": "特記仕様・凡例・共通事項への参照図。",
+    "key_fields_json": [
+      "特記",
+      "共通事項",
+      "凡例"
+    ],
+    "keywords_json": [
+      "特記",
+      "共通"
+    ],
+    "main_phase": "metadata"
+  },
+  {
+    "sheet_type_id": "SHT_004",
+    "discipline": "共通",
+    "sheet_type_name": "工区・棟区分図",
+    "canonical_key": "zone_building_index",
+    "description": "棟別・工区別の範囲図。",
+    "key_fields_json": [
+      "棟名",
+      "工区",
+      "対象範囲"
+    ],
+    "keywords_json": [
+      "棟",
+      "工区"
+    ],
+    "main_phase": "metadata"
+  },
+  {
+    "sheet_type_id": "SHT_101",
+    "discipline": "建築",
+    "sheet_type_name": "案内図",
+    "canonical_key": "location_map",
+    "description": "周辺位置・アクセス・現場位置。",
+    "key_fields_json": [
+      "案内図",
+      "方位",
+      "周辺道路"
+    ],
+    "keywords_json": [
+      "案内図",
+      "位置図"
+    ],
+    "main_phase": "classify"
+  },
+  {
+    "sheet_type_id": "SHT_102",
+    "discipline": "建築",
+    "sheet_type_name": "配置図",
+    "canonical_key": "site_plan",
+    "description": "敷地内建物配置、外構、境界、方位。",
+    "key_fields_json": [
+      "配置図",
+      "敷地境界",
+      "道路",
+      "建物外形"
+    ],
+    "keywords_json": [
+      "配置図",
+      "敷地"
+    ],
+    "main_phase": "classify"
+  },
+  {
+    "sheet_type_id": "SHT_103",
+    "discipline": "建築",
+    "sheet_type_name": "各階平面図",
+    "canonical_key": "floor_plan",
+    "description": "室、壁、建具、寸法、通り芯を含む標準平面図。",
+    "key_fields_json": [
+      "階",
+      "通り芯",
+      "室名",
+      "寸法"
+    ],
+    "keywords_json": [
+      "平面図",
+      "FLOOR"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_104",
+    "discipline": "建築",
+    "sheet_type_name": "平面詳細図",
+    "canonical_key": "detailed_floor_plan",
+    "description": "納まり・局所詳細を含む平面図。",
+    "key_fields_json": [
+      "詳細",
+      "納まり",
+      "開口"
+    ],
+    "keywords_json": [
+      "詳細平面",
+      "詳細図"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_105",
+    "discipline": "建築",
+    "sheet_type_name": "立面図",
+    "canonical_key": "elevation",
+    "description": "外観、開口、仕上げ、高さ関係。",
+    "key_fields_json": [
+      "立面図",
+      "外壁",
+      "開口",
+      "高さ"
+    ],
+    "keywords_json": [
+      "立面",
+      "ELEV"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_106",
+    "discipline": "建築",
+    "sheet_type_name": "断面図",
+    "canonical_key": "section",
+    "description": "高さ、階高、床・天井・屋根断面。",
+    "key_fields_json": [
+      "断面図",
+      "階高",
+      "GL",
+      "FL"
+    ],
+    "keywords_json": [
+      "断面",
+      "SECTION"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_107",
+    "discipline": "建築",
+    "sheet_type_name": "矩計図",
+    "canonical_key": "wall_section_detail",
+    "description": "躯体・外装・防水・仕上の納まり詳細。",
+    "key_fields_json": [
+      "矩計",
+      "納まり",
+      "防水",
+      "見切"
+    ],
+    "keywords_json": [
+      "矩計",
+      "納まり"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_108",
+    "discipline": "建築",
+    "sheet_type_name": "展開図",
+    "canonical_key": "interior_elevation",
+    "description": "室内壁面展開、器具位置、仕上。",
+    "key_fields_json": [
+      "展開図",
+      "壁面",
+      "建具",
+      "器具"
+    ],
+    "keywords_json": [
+      "展開",
+      "ELEV"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_109",
+    "discipline": "建築",
+    "sheet_type_name": "天井伏図",
+    "canonical_key": "ceiling_plan",
+    "description": "見上げの天井図。照明・点検口・空調器具位置。",
+    "key_fields_json": [
+      "天井伏図",
+      "CH",
+      "見上"
+    ],
+    "keywords_json": [
+      "天井伏図",
+      "RCP"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_110",
+    "discipline": "建築",
+    "sheet_type_name": "基礎伏図",
+    "canonical_key": "foundation_plan",
+    "description": "基礎配置・寸法・見下げ。",
+    "key_fields_json": [
+      "基礎伏図",
+      "フーチング",
+      "立上り"
+    ],
+    "keywords_json": [
+      "基礎伏図"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_111",
+    "discipline": "建築",
+    "sheet_type_name": "建具表",
+    "canonical_key": "door_window_schedule",
+    "description": "建具番号、寸法、仕様、金物。",
+    "key_fields_json": [
+      "建具表",
+      "DW",
+      "寸法",
+      "仕様"
+    ],
+    "keywords_json": [
+      "建具表",
+      "表"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_112",
+    "discipline": "建築",
+    "sheet_type_name": "仕上表",
+    "canonical_key": "finish_schedule",
+    "description": "室別仕上げ一覧。",
+    "key_fields_json": [
+      "仕上表",
+      "床",
+      "壁",
+      "天井"
+    ],
+    "keywords_json": [
+      "仕上表"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_113",
+    "discipline": "建築",
+    "sheet_type_name": "面積表",
+    "canonical_key": "area_schedule",
+    "description": "室別・階別面積一覧。",
+    "key_fields_json": [
+      "面積表",
+      "㎡"
+    ],
+    "keywords_json": [
+      "面積"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_114",
+    "discipline": "建築",
+    "sheet_type_name": "外構詳細図",
+    "canonical_key": "site_detail",
+    "description": "舗装・縁石・フェンス・門扉等詳細。",
+    "key_fields_json": [
+      "外構詳細",
+      "舗装",
+      "縁石"
+    ],
+    "keywords_json": [
+      "外構",
+      "詳細"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_115",
+    "discipline": "建築",
+    "sheet_type_name": "植栽図",
+    "canonical_key": "landscape_plan",
+    "description": "植栽位置・樹種・規格。",
+    "key_fields_json": [
+      "植栽図",
+      "樹種",
+      "客土"
+    ],
+    "keywords_json": [
+      "植栽"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_116",
+    "discipline": "建築",
+    "sheet_type_name": "仮設計画図",
+    "canonical_key": "temporary_works_plan",
+    "description": "仮囲い・搬入動線・仮設設備。",
+    "key_fields_json": [
+      "仮設",
+      "仮囲い",
+      "ゲート"
+    ],
+    "keywords_json": [
+      "仮設"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_201",
+    "discipline": "構造",
+    "sheet_type_name": "構造共通事項",
+    "canonical_key": "struct_general_notes",
+    "description": "構造図の共通注意、材料、かぶり、継手。",
+    "key_fields_json": [
+      "構造共通事項",
+      "材料",
+      "かぶり"
+    ],
+    "keywords_json": [
+      "構造共通"
+    ],
+    "main_phase": "resolve"
+  },
+  {
+    "sheet_type_id": "SHT_202",
+    "discipline": "構造",
+    "sheet_type_name": "杭伏図",
+    "canonical_key": "pile_plan",
+    "description": "杭配置、杭種、杭長、杭径。",
+    "key_fields_json": [
+      "杭伏図",
+      "杭長",
+      "杭径"
+    ],
+    "keywords_json": [
+      "杭"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_203",
+    "discipline": "構造",
+    "sheet_type_name": "基礎配筋図",
+    "canonical_key": "foundation_rebar",
+    "description": "基礎鉄筋配置、径、本数、ピッチ。",
+    "key_fields_json": [
+      "配筋",
+      "D",
+      "@",
+      "かぶり"
+    ],
+    "keywords_json": [
+      "基礎配筋"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_204",
+    "discipline": "構造",
+    "sheet_type_name": "各階床伏図",
+    "canonical_key": "framing_plan",
+    "description": "梁・スラブ・壁・柱位置。",
+    "key_fields_json": [
+      "床伏図",
+      "梁",
+      "スラブ"
+    ],
+    "keywords_json": [
+      "床伏図"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_205",
+    "discipline": "構造",
+    "sheet_type_name": "柱リスト",
+    "canonical_key": "column_schedule",
+    "description": "柱符号、断面、配筋/鋼材。",
+    "key_fields_json": [
+      "柱リスト",
+      "C",
+      "サイズ"
+    ],
+    "keywords_json": [
+      "柱表"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_206",
+    "discipline": "構造",
+    "sheet_type_name": "梁リスト",
+    "canonical_key": "beam_schedule",
+    "description": "梁符号、断面、配筋/鋼材。",
+    "key_fields_json": [
+      "梁リスト",
+      "G",
+      "サイズ"
+    ],
+    "keywords_json": [
+      "梁表"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_207",
+    "discipline": "構造",
+    "sheet_type_name": "壁・床版配筋詳細",
+    "canonical_key": "wall_slab_rebar_detail",
+    "description": "壁・床版配筋の標準/詳細。",
+    "key_fields_json": [
+      "壁",
+      "床版",
+      "配筋"
+    ],
+    "keywords_json": [
+      "配筋詳細"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_208",
+    "discipline": "構造",
+    "sheet_type_name": "鉄骨一般図",
+    "canonical_key": "steel_general",
+    "description": "鉄骨建方、部材配置、通り芯。",
+    "key_fields_json": [
+      "鉄骨",
+      "部材",
+      "通り芯"
+    ],
+    "keywords_json": [
+      "鉄骨一般"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_209",
+    "discipline": "構造",
+    "sheet_type_name": "鉄骨詳細図",
+    "canonical_key": "steel_detail",
+    "description": "継手、プレート、溶接、ボルト詳細。",
+    "key_fields_json": [
+      "PL",
+      "HTB",
+      "溶接",
+      "継手"
+    ],
+    "keywords_json": [
+      "鉄骨詳細"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_301",
+    "discipline": "電気",
+    "sheet_type_name": "電灯設備平面図",
+    "canonical_key": "lighting_plan",
+    "description": "照明器具・スイッチ・回路注記。",
+    "key_fields_json": [
+      "照明",
+      "スイッチ",
+      "回路"
+    ],
+    "keywords_json": [
+      "電灯"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_302",
+    "discipline": "電気",
+    "sheet_type_name": "コンセント・動力平面図",
+    "canonical_key": "power_plan",
+    "description": "コンセント・動力・専用回路・機器電源。",
+    "key_fields_json": [
+      "コンセント",
+      "動力",
+      "専用"
+    ],
+    "keywords_json": [
+      "動力"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_303",
+    "discipline": "電気",
+    "sheet_type_name": "受変電設備図",
+    "canonical_key": "substation_plan",
+    "description": "受変電盤・変圧器・高圧系統。",
+    "key_fields_json": [
+      "受変電",
+      "高圧",
+      "変圧器"
+    ],
+    "keywords_json": [
+      "受変電"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_304",
+    "discipline": "電気",
+    "sheet_type_name": "単線結線図",
+    "canonical_key": "single_line_diagram",
+    "description": "盤系統・遮断器・回路接続。",
+    "key_fields_json": [
+      "単線",
+      "MCCB",
+      "回路"
+    ],
+    "keywords_json": [
+      "単線"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_305",
+    "discipline": "電気",
+    "sheet_type_name": "盤結線図",
+    "canonical_key": "panel_schedule",
+    "description": "盤名称、回路数、回路容量。",
+    "key_fields_json": [
+      "盤",
+      "回路表",
+      "分電盤"
+    ],
+    "keywords_json": [
+      "盤図"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_306",
+    "discipline": "電気",
+    "sheet_type_name": "通信情報設備図",
+    "canonical_key": "telecom_plan",
+    "description": "LAN、電話、TV、インターホン等。",
+    "key_fields_json": [
+      "通信",
+      "LAN",
+      "TV"
+    ],
+    "keywords_json": [
+      "弱電"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_307",
+    "discipline": "電気",
+    "sheet_type_name": "火災報知設備図",
+    "canonical_key": "fire_alarm_plan",
+    "description": "感知器、発信機、受信機、回線。",
+    "key_fields_json": [
+      "火報",
+      "感知器",
+      "受信機"
+    ],
+    "keywords_json": [
+      "火災報知"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_308",
+    "discipline": "電気",
+    "sheet_type_name": "中央監視・防犯設備図",
+    "canonical_key": "bms_security_plan",
+    "description": "監視点、カメラ、制御接点。",
+    "key_fields_json": [
+      "監視",
+      "CCTV",
+      "BMS"
+    ],
+    "keywords_json": [
+      "監視"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_309",
+    "discipline": "電気",
+    "sheet_type_name": "構内配電・外灯図",
+    "canonical_key": "site_electrical",
+    "description": "外灯、引込、構内配線。",
+    "key_fields_json": [
+      "外灯",
+      "構内配電"
+    ],
+    "keywords_json": [
+      "外構電気"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_401",
+    "discipline": "機械",
+    "sheet_type_name": "空調設備平面図",
+    "canonical_key": "hvac_plan",
+    "description": "室内機、室外機、ダクト、冷媒、ドレン。",
+    "key_fields_json": [
+      "空調",
+      "室内機",
+      "ダクト"
+    ],
+    "keywords_json": [
+      "空調"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_402",
+    "discipline": "機械",
+    "sheet_type_name": "換気・排煙設備平面図",
+    "canonical_key": "vent_smoke_plan",
+    "description": "換気系統、排煙口、ダクトルート。",
+    "key_fields_json": [
+      "換気",
+      "排煙",
+      "FD"
+    ],
+    "keywords_json": [
+      "換気",
+      "排煙"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_403",
+    "discipline": "機械",
+    "sheet_type_name": "衛生器具設備平面図",
+    "canonical_key": "sanitary_fixture_plan",
+    "description": "衛生器具配置、器具番号。",
+    "key_fields_json": [
+      "衛生器具",
+      "便器",
+      "洗面"
+    ],
+    "keywords_json": [
+      "衛生器具"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_404",
+    "discipline": "機械",
+    "sheet_type_name": "給水設備平面図",
+    "canonical_key": "water_supply_plan",
+    "description": "給水配管、口径、系統。",
+    "key_fields_json": [
+      "給水",
+      "配管",
+      "口径"
+    ],
+    "keywords_json": [
+      "給水"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_405",
+    "discipline": "機械",
+    "sheet_type_name": "排水・通気設備平面図",
+    "canonical_key": "drain_vent_plan",
+    "description": "排水管、通気管、勾配。",
+    "key_fields_json": [
+      "排水",
+      "通気",
+      "勾配"
+    ],
+    "keywords_json": [
+      "排水"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_406",
+    "discipline": "機械",
+    "sheet_type_name": "消火設備平面図",
+    "canonical_key": "fire_fighting_plan",
+    "description": "消火栓、スプリンクラー、消火配管。",
+    "key_fields_json": [
+      "消火",
+      "SP",
+      "消火栓"
+    ],
+    "keywords_json": [
+      "消火"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_407",
+    "discipline": "機械",
+    "sheet_type_name": "配管系統図",
+    "canonical_key": "piping_riser",
+    "description": "立管・枝管・系統関係。",
+    "key_fields_json": [
+      "系統図",
+      "立管",
+      "枝管"
+    ],
+    "keywords_json": [
+      "配管系統"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_408",
+    "discipline": "機械",
+    "sheet_type_name": "ダクト系統図",
+    "canonical_key": "duct_riser",
+    "description": "系統ごとのダクト接続・機器関係。",
+    "key_fields_json": [
+      "ダクト系統",
+      "機器"
+    ],
+    "keywords_json": [
+      "ダクト系統"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_409",
+    "discipline": "機械",
+    "sheet_type_name": "機器表",
+    "canonical_key": "equipment_schedule",
+    "description": "機器番号、能力、仕様、電源。",
+    "key_fields_json": [
+      "機器表",
+      "能力",
+      "仕様"
+    ],
+    "keywords_json": [
+      "機器表"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_410",
+    "discipline": "機械",
+    "sheet_type_name": "自動制御図",
+    "canonical_key": "control_diagram",
+    "description": "制御点、シーケンス、接点。",
+    "key_fields_json": [
+      "自動制御",
+      "制御点"
+    ],
+    "keywords_json": [
+      "制御"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_501",
+    "discipline": "土木",
+    "sheet_type_name": "道路平面図",
+    "canonical_key": "road_plan",
+    "description": "測点・幅員・線形・構造物。",
+    "key_fields_json": [
+      "平面図",
+      "測点",
+      "幅員"
+    ],
+    "keywords_json": [
+      "道路平面"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_502",
+    "discipline": "土木",
+    "sheet_type_name": "縦断面図",
+    "canonical_key": "road_profile",
+    "description": "計画高・現況高・勾配・縦曲線。",
+    "key_fields_json": [
+      "縦断",
+      "現況高",
+      "計画高"
+    ],
+    "keywords_json": [
+      "縦断"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_503",
+    "discipline": "土木",
+    "sheet_type_name": "標準横断面図",
+    "canonical_key": "standard_cross_section",
+    "description": "道路・造成標準断面、層構成。",
+    "key_fields_json": [
+      "標準横断",
+      "層構成"
+    ],
+    "keywords_json": [
+      "横断"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_504",
+    "discipline": "土木",
+    "sheet_type_name": "横断面図",
+    "canonical_key": "cross_section",
+    "description": "測点ごとの横断形状。",
+    "key_fields_json": [
+      "横断面",
+      "測点"
+    ],
+    "keywords_json": [
+      "横断"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_505",
+    "discipline": "土木",
+    "sheet_type_name": "土工計画図",
+    "canonical_key": "earthwork_plan",
+    "description": "切土盛土、法面、整地。",
+    "key_fields_json": [
+      "土工",
+      "切土",
+      "盛土",
+      "法面"
+    ],
+    "keywords_json": [
+      "造成"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_506",
+    "discipline": "土木",
+    "sheet_type_name": "排水施設図",
+    "canonical_key": "site_drainage_plan",
+    "description": "側溝、桝、管渠、勾配。",
+    "key_fields_json": [
+      "排水",
+      "側溝",
+      "桝"
+    ],
+    "keywords_json": [
+      "排水"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_507",
+    "discipline": "土木",
+    "sheet_type_name": "舗装構成図",
+    "canonical_key": "pavement_section",
+    "description": "舗装種別、層厚、路盤。",
+    "key_fields_json": [
+      "舗装",
+      "表層",
+      "基層",
+      "路盤"
+    ],
+    "keywords_json": [
+      "舗装"
+    ],
+    "main_phase": "extract"
+  },
+  {
+    "sheet_type_id": "SHT_508",
+    "discipline": "土木",
+    "sheet_type_name": "擁壁・小構造物図",
+    "canonical_key": "retaining_structure",
+    "description": "擁壁、集水桝、カルバート等。",
+    "key_fields_json": [
+      "擁壁",
+      "小構造物"
+    ],
+    "keywords_json": [
+      "構造物"
+    ],
+    "main_phase": "extract"
+  }
+]
