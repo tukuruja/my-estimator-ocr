@@ -119,6 +119,12 @@ export default function Header() {
           hoverColor="hover:bg-amber-600"
           href="/ai-consensus"
         />
+        <NavButton
+          label="🧭 見積Logic"
+          color="bg-emerald-600"
+          hoverColor="hover:bg-emerald-700"
+          href="/ai-estimation-logic"
+        />
       </nav>
     </header>
   );

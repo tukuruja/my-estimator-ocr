@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createAppStateApiMiddleware } from "./appStateApi";
 import { createConsensusApiMiddleware } from "./consensusApi";
+import { createEstimationLogicApiMiddleware } from "./estimationLogicApi";
 import { createMasterApiMiddleware } from "./masterApi";
 import { createOcrPackApiMiddleware } from "./ocrPackApi";
 import { createReportApiMiddleware } from "./reportApi";
@@ -42,7 +43,7 @@ async function startServer() {
       res.setHeader("Vary", "Origin");
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Access-Control-Allow-Methods", "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Workspace-Id");
     }
 
     if (req.method === "OPTIONS") {
@@ -58,6 +59,7 @@ async function startServer() {
   });
 
   app.use(createConsensusApiMiddleware());
+  app.use(createEstimationLogicApiMiddleware());
   app.use(createOcrPackApiMiddleware());
   app.use(createMasterApiMiddleware());
   app.use(createReportApiMiddleware());
