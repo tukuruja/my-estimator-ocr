@@ -117,6 +117,24 @@ export interface EstimationLogicPreviewResponse {
   openAiResponsesRequest: Record<string, unknown>;
 }
 
+export interface EstimationLogicAuditRecord {
+  id: string;
+  workspaceId: string;
+  createdAt: string;
+  mode: 'openai' | 'fallback';
+  model: string | null;
+  projectId: string;
+  blockId: string;
+  drawingId: string | null;
+  responseId: string | null;
+  refusal: string | null;
+  warnings: string[];
+}
+
+export interface EstimationLogicRunResponse extends EstimationLogicPreviewResponse {
+  audit: EstimationLogicAuditRecord;
+}
+
 const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
   secondary_product: '二次製品工',
   retaining_wall: '擁壁工',
@@ -489,6 +507,7 @@ export function buildEstimationLogicOpenAiRequest(input: EstimationLogicPreviewI
       format: {
         type: 'json_schema',
         name: 'estimation_logic_execution',
+        strict: true,
         schema: ESTIMATION_LOGIC_BLUEPRINT.outputSchema,
       },
     },

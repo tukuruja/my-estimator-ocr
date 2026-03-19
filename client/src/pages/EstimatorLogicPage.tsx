@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { Bot, CheckCircle2, HardHat, ListChecks, ShieldAlert } from 'lucide-react';
 
 import Header from '@/components/Header';
-import { fetchEstimationLogicBlueprint, previewEstimationLogicRequest } from '@/lib/api';
+import { fetchEstimationLogicBlueprint, runEstimationLogic } from '@/lib/api';
 import { loadData } from '@/lib/storage';
 import { getWorkTypeLabel } from '@/lib/workTypes';
 import type { AppState, EstimateBlock, Project } from '@/lib/types';
 import type {
   EstimationLogicBlueprint,
-  EstimationLogicPreviewResponse,
+  EstimationLogicRunResponse,
 } from '@shared/estimationLogic';
 
 function resolveActiveProject(state: AppState | null): Project | null {
@@ -32,7 +32,7 @@ function JsonPanel({ title, value }: { title: string; value: unknown }) {
 
 export default function EstimatorLogicPage() {
   const [blueprint, setBlueprint] = useState<EstimationLogicBlueprint | null>(null);
-  const [preview, setPreview] = useState<EstimationLogicPreviewResponse | null>(null);
+  const [runResult, setRunResult] = useState<EstimationLogicRunResponse | null>(null);
   const [appState, setAppState] = useState<AppState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,14 +61,14 @@ export default function EstimatorLogicPage() {
           : null;
 
         if (project && block) {
-          const previewResponse = await previewEstimationLogicRequest({
+          const previewResponse = await runEstimationLogic({
             project,
             block,
             drawing,
             effectiveDate: new Date().toISOString().slice(0, 10),
           });
           if (cancelled) return;
-          setPreview(previewResponse);
+          setRunResult(previewResponse);
         }
       } catch (loadError) {
         if (cancelled) return;
@@ -207,39 +207,43 @@ export default function EstimatorLogicPage() {
               </div>
             </section>
 
-            {preview && (
+            {runResult && (
               <>
                 <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
                   <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="text-sm font-semibold text-slate-900">この案件に対する実行結果</div>
                     <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                       <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">decision</div>
-                      <div className="mt-1 text-lg font-bold text-slate-900">{preview.execution.decision}</div>
-                      <div className="mt-2 text-sm leading-6 text-slate-700">{preview.execution.summary}</div>
+                      <div className="mt-1 text-lg font-bold text-slate-900">{runResult.execution.decision}</div>
+                      <div className="mt-2 text-sm leading-6 text-slate-700">{runResult.execution.summary}</div>
+                      <div className="mt-2 text-xs text-slate-500">
+                        mode: <span className="font-semibold text-slate-700">{runResult.audit.mode}</span>
+                        {runResult.audit.model ? <> / model: <span className="font-semibold text-slate-700">{runResult.audit.model}</span></> : null}
+                      </div>
                     </div>
                     <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                       <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">operator message</div>
-                      <div className="mt-2 text-sm leading-6 text-slate-700">{preview.execution.operatorMessage}</div>
+                      <div className="mt-2 text-sm leading-6 text-slate-700">{runResult.execution.operatorMessage}</div>
                     </div>
                     <div className="mt-4 space-y-3">
-                      {preview.execution.stopReasons.length > 0 && (
+                      {runResult.execution.stopReasons.length > 0 && (
                         <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3">
                           <div className="text-sm font-semibold text-rose-900">止めている理由</div>
                           <div className="mt-2 space-y-2">
-                            {preview.execution.stopReasons.map((item) => (
+                            {runResult.execution.stopReasons.map((item) => (
                               <div key={item} className="text-sm leading-6 text-rose-700">{item}</div>
                             ))}
                           </div>
                         </div>
                       )}
                       <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                        <div className="text-sm font-semibold text-slate-900">次にやること</div>
-                        <div className="mt-2 space-y-2">
-                          {preview.execution.nextActions.map((item) => (
-                            <div key={item} className="text-sm leading-6 text-slate-700">{item}</div>
-                          ))}
+                          <div className="text-sm font-semibold text-slate-900">次にやること</div>
+                          <div className="mt-2 space-y-2">
+                          {runResult.execution.nextActions.map((item) => (
+                              <div key={item} className="text-sm leading-6 text-slate-700">{item}</div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
                     </div>
                   </section>
 
@@ -247,7 +251,7 @@ export default function EstimatorLogicPage() {
                     <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                       <div className="text-sm font-semibold text-slate-900">担当者チェックリスト</div>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        {preview.execution.coachingChecklist.map((item) => (
+                        {runResult.execution.coachingChecklist.map((item) => (
                           <div key={item} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
                             {item}
                           </div>
@@ -258,7 +262,7 @@ export default function EstimatorLogicPage() {
                     <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                       <div className="text-sm font-semibold text-slate-900">数量ガードレール</div>
                       <div className="mt-3 space-y-3">
-                        {preview.execution.quantityGuardrails.map((item) => (
+                        {runResult.execution.quantityGuardrails.map((item) => (
                           <div key={item} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
                             {item}
                           </div>
@@ -270,12 +274,12 @@ export default function EstimatorLogicPage() {
 
                 <section className="grid gap-4 xl:grid-cols-2">
                   <JsonPanel title="AI prompt" value={blueprint.systemPrompt} />
-                  <JsonPanel title="実行結果 JSON" value={preview.execution} />
+                  <JsonPanel title="実行結果 JSON" value={runResult.execution} />
                 </section>
 
                 <section className="grid gap-4 xl:grid-cols-2">
-                  <JsonPanel title="logic context" value={preview.context} />
-                  <JsonPanel title="OpenAI Responses request" value={preview.openAiResponsesRequest} />
+                  <JsonPanel title="logic context" value={runResult.context} />
+                  <JsonPanel title="OpenAI Responses request" value={runResult.openAiResponsesRequest} />
                 </section>
               </>
             )}

@@ -9,7 +9,7 @@ import OcrReviewPanel from '@/components/OcrReviewPanel';
 import type { OcrReviewPanelHandle } from '@/components/OcrReviewPanel';
 import DocumentPanel from '@/components/DocumentPanel';
 import { calculate } from '@/lib/calculations';
-import { fetchMasters, generateReport, getAiApiUnavailableMessage, isAiApiAvailable, parseDrawing, type OcrParseJobState } from '@/lib/api';
+import { fetchMasters, generateReport, getAiApiUnavailableMessage, isAiApiAvailable, parseDrawing, runEstimationLogic, type OcrParseJobState } from '@/lib/api';
 import { canonicalizeMasterName, createSeedMasterItems } from '@/lib/masterData';
 import {
   createDefaultBlock,
@@ -29,6 +29,7 @@ import {
 } from '@/lib/types';
 import { loadData, saveData } from '@/lib/storage';
 import { getWorkTypeLabel } from '@/lib/workTypes';
+import type { EstimationLogicRunResponse } from '@shared/estimationLogic';
 import { toast } from 'sonner';
 
 const CANDIDATE_LABELS: Record<string, string> = {
@@ -111,6 +112,87 @@ function ReviewQueueBadge({ item }: { item: OcrReviewQueueItem }) {
         <div className="mt-2 text-[11px] leading-5 opacity-80">
           {item.sourcePage ? `p.${item.sourcePage}` : ''}{item.sourcePage && item.sourceText ? ' / ' : ''}{item.sourceText ?? ''}
         </div>
+      )}
+    </div>
+  );
+}
+
+function EstimationLogicCard({ run, loading, error }: { run: EstimationLogicRunResponse | null; loading: boolean; error: string | null }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+        <Workflow className="h-4 w-4 text-emerald-600" />
+        AI見積 Logic
+      </div>
+
+      {loading && (
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          見積ロジックを実行しています。
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && !run && (
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          図面 OCR 完了後に、ここへ「次にやること」が表示されます。
+        </div>
+      )}
+
+      {run && (
+        <>
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">decision</div>
+            <div className="mt-1 text-lg font-bold text-slate-900">{run.execution.decision}</div>
+            <div className="mt-2 text-sm leading-6 text-slate-700">{run.execution.summary}</div>
+            <div className="mt-2 text-xs text-slate-500">
+              mode: <span className="font-semibold text-slate-700">{run.audit.mode}</span>
+              {run.audit.model ? <> / model: <span className="font-semibold text-slate-700">{run.audit.model}</span></> : null}
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-md border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800">次にやること</div>
+            <div className="space-y-2 p-3">
+              {run.execution.nextActions.map((item) => (
+                <div key={item} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-sm font-semibold text-slate-900">担当者メッセージ</div>
+            <div className="mt-2 text-sm leading-6 text-slate-700">{run.execution.operatorMessage}</div>
+          </div>
+
+          {run.execution.stopReasons.length > 0 && (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3">
+              <div className="text-sm font-semibold text-amber-900">止めている理由</div>
+              <div className="mt-2 space-y-2">
+                {run.execution.stopReasons.map((item) => (
+                  <div key={item} className="text-sm leading-6 text-amber-800">{item}</div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {run.audit.warnings.length > 0 && (
+            <div className="mt-3 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-3">
+              <div className="text-sm font-semibold text-indigo-900">実行メモ</div>
+              <div className="mt-2 space-y-2">
+                {run.audit.warnings.map((item) => (
+                  <div key={item} className="text-sm leading-6 text-indigo-800">{item}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -269,6 +351,9 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const [masters, setMasters] = useState<PriceMasterItem[]>([]);
   const [reportBundle, setReportBundle] = useState<GeneratedReportBundle>(EMPTY_REPORT_BUNDLE);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [logicRun, setLogicRun] = useState<EstimationLogicRunResponse | null>(null);
+  const [logicRunError, setLogicRunError] = useState<string | null>(null);
+  const [isLogicRunning, setIsLogicRunning] = useState(false);
   const ocrReviewPanelRef = useRef<OcrReviewPanelHandle | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -392,6 +477,46 @@ export default function Home({ preferredBlockType }: HomeProps) {
     };
   }, [activeBlock, activeDrawing, activeProject, effectiveDate]);
 
+  useEffect(() => {
+    if (!activeProject || !activeBlock) {
+      setLogicRun(null);
+      setLogicRunError(null);
+      setIsLogicRunning(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setIsLogicRunning(true);
+      void runEstimationLogic({
+        project: activeProject,
+        block: activeBlock,
+        drawing: activeDrawing,
+        effectiveDate,
+      })
+        .then((run) => {
+          if (cancelled) return;
+          setLogicRun(run);
+          setLogicRunError(null);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setLogicRun(null);
+          setLogicRunError(error instanceof Error ? error.message : '見積ロジックの実行に失敗しました。');
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setIsLogicRunning(false);
+          }
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate]);
+
   const replaceActiveProject = useCallback((updater: (project: Project) => Project) => {
     setAppState((prev) => {
       if (!prev) return prev;
@@ -461,6 +586,8 @@ export default function Home({ preferredBlockType }: HomeProps) {
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
     setUploadStatusMessage(null);
+    setLogicRun(null);
+    setLogicRunError(null);
   }, [appState, preferredBlockType]);
 
   const handleSelectProject = useCallback((projectId: string) => {
@@ -482,6 +609,8 @@ export default function Home({ preferredBlockType }: HomeProps) {
     setSelectedCandidateId(null);
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
+    setLogicRun(null);
+    setLogicRunError(null);
   }, [preferredBlockType]);
 
   const handleAddBlock = useCallback(() => {
@@ -822,6 +951,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
             </div>
 
             <CalculationResults result={result} block={activeBlock} />
+            <EstimationLogicCard run={logicRun} loading={isLogicRunning} error={logicRunError} />
             {reportError && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
                 {reportError}

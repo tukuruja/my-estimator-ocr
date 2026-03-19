@@ -4,10 +4,14 @@ import { calculate } from '../client/src/lib/calculations';
 import { generateReportBundle } from '../client/src/lib/reporting';
 import type { Drawing, EstimateBlock, Project } from '../client/src/lib/types';
 import {
+  buildEstimationLogicOpenAiRequest,
   buildEstimationLogicPreview,
+  type EstimationLogicExecution,
+  type EstimationLogicRunResponse,
   ESTIMATION_LOGIC_BLUEPRINT,
   type EstimationLogicPreviewInput,
 } from '../shared/estimationLogic';
+import { writeEstimationLogicAuditLog } from './estimationLogicAuditStore';
 import { listMasterItems } from './masterStore';
 
 type Next = (err?: unknown) => void;
@@ -40,6 +44,15 @@ interface PreviewRequestBody {
   effectiveDate?: string;
 }
 
+function getWorkspaceId(req: IncomingMessage): string {
+  const headerValue = req.headers['x-workspace-id'];
+  const workspaceId = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (typeof workspaceId === 'string' && workspaceId.trim()) {
+    return workspaceId;
+  }
+  return 'anonymous';
+}
+
 async function buildPreviewResponse(body: PreviewRequestBody) {
   if (!body.project || !body.block) {
     throw new Error('preview-request には project と block の snapshot が必要です。');
@@ -66,6 +79,135 @@ async function buildPreviewResponse(body: PreviewRequestBody) {
   return buildEstimationLogicPreview(previewInput);
 }
 
+function buildAuditBase(workspaceId: string, body: PreviewRequestBody) {
+  return {
+    id: crypto.randomUUID(),
+    workspaceId,
+    createdAt: new Date().toISOString(),
+    projectId: body.project?.id ?? 'unknown',
+    blockId: body.block?.id ?? 'unknown',
+    drawingId: body.drawing?.id ?? null,
+  };
+}
+
+function extractOutputText(payload: any): string | null {
+  if (typeof payload?.output_text === 'string' && payload.output_text.trim()) {
+    return payload.output_text;
+  }
+  const parts = Array.isArray(payload?.output) ? payload.output : [];
+  for (const part of parts) {
+    const contents = Array.isArray(part?.content) ? part.content : [];
+    for (const content of contents) {
+      if (typeof content?.text === 'string' && content.text.trim()) {
+        return content.text;
+      }
+      if (typeof content?.output_text === 'string' && content.output_text.trim()) {
+        return content.output_text;
+      }
+    }
+  }
+  return null;
+}
+
+function extractRefusal(payload: any): string | null {
+  if (typeof payload?.refusal === 'string' && payload.refusal.trim()) {
+    return payload.refusal;
+  }
+  const parts = Array.isArray(payload?.output) ? payload.output : [];
+  for (const part of parts) {
+    const contents = Array.isArray(part?.content) ? part.content : [];
+    for (const content of contents) {
+      if (typeof content?.refusal === 'string' && content.refusal.trim()) {
+        return content.refusal;
+      }
+    }
+  }
+  return null;
+}
+
+async function runOpenAiExecution(
+  preview: Awaited<ReturnType<typeof buildPreviewResponse>>,
+  apiKey: string,
+  model: string,
+): Promise<{ execution: EstimationLogicExecution; responseId: string | null; refusal: string | null; requestPayload: Record<string, unknown> }> {
+  const requestPayload = {
+    ...preview.openAiResponsesRequest,
+    model,
+  };
+
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestPayload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI Responses API が失敗しました: ${response.status} ${errorText}`);
+  }
+
+  const payload = await response.json() as any;
+  const refusal = extractRefusal(payload);
+  const outputText = extractOutputText(payload);
+  if (!outputText) {
+    throw new Error('OpenAI Responses API から JSON 出力が返りませんでした。');
+  }
+
+  return {
+    execution: JSON.parse(outputText) as EstimationLogicExecution,
+    responseId: typeof payload?.id === 'string' ? payload.id : null,
+    refusal,
+    requestPayload,
+  };
+}
+
+async function buildRunResponse(workspaceId: string, body: PreviewRequestBody): Promise<EstimationLogicRunResponse> {
+  const preview = await buildPreviewResponse(body);
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-mini';
+  const warnings: string[] = [];
+
+  let execution = preview.execution;
+  let mode: 'openai' | 'fallback' = 'fallback';
+  let responseId: string | null = null;
+  let refusal: string | null = null;
+  let openAiResponsesRequest = preview.openAiResponsesRequest;
+
+  if (apiKey) {
+    const run = await runOpenAiExecution(preview, apiKey, model);
+    execution = run.execution;
+    responseId = run.responseId;
+    refusal = run.refusal;
+    openAiResponsesRequest = run.requestPayload;
+    mode = 'openai';
+    if (refusal) {
+      warnings.push(`OpenAI refusal: ${refusal}`);
+    }
+  } else {
+    warnings.push('OPENAI_API_KEY が未設定のため、deterministic fallback を返しています。');
+  }
+
+  const response: EstimationLogicRunResponse = {
+    ...preview,
+    execution,
+    openAiResponsesRequest,
+    audit: {
+      ...buildAuditBase(workspaceId, body),
+      mode,
+      model: apiKey ? model : null,
+      responseId,
+      refusal,
+      warnings,
+    },
+  };
+
+  await writeEstimationLogicAuditLog(workspaceId, response);
+  return response;
+}
+
 async function handleEstimationLogicApi(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const pathname = getPathname(req);
   const method = req.method || 'GET';
@@ -79,6 +221,13 @@ async function handleEstimationLogicApi(req: IncomingMessage, res: ServerRespons
     const body = await readJsonBody<PreviewRequestBody>(req);
     const preview = await buildPreviewResponse(body);
     sendJson(res, 200, { success: true, data: preview });
+    return true;
+  }
+
+  if (pathname === '/api/ai/estimation-logic/run' && method === 'POST') {
+    const body = await readJsonBody<PreviewRequestBody>(req);
+    const run = await buildRunResponse(getWorkspaceId(req), body);
+    sendJson(res, 200, { success: true, data: run });
     return true;
   }
 

@@ -12,8 +12,10 @@ import type {
 import type {
   EstimationLogicBlueprint,
   EstimationLogicPreviewResponse,
+  EstimationLogicRunResponse,
 } from '@shared/estimationLogic';
 import type { Drawing, EstimateBlock, Project } from './types';
+import { getWorkspaceHeaders } from './workspace';
 
 const FALLBACK_API_BASE_URL = 'http://127.0.0.1:8000';
 const LOCAL_APP_URL = 'http://localhost:3000';
@@ -141,10 +143,10 @@ async function createParseDrawingJob(file: File, mode: string): Promise<OcrParse
   formData.append('file', file);
   formData.append('mode', mode);
 
-  const response = await fetch(resolveAiApiUrl('/api/ocr/jobs'), {
-    method: 'POST',
-    body: formData,
-  });
+    const response = await fetch(resolveAiApiUrl('/api/ocr/jobs'), {
+      method: 'POST',
+      body: formData,
+    });
   await ensureJsonApiResponse(response, getAiApiUnavailableMessage(), 'OCRジョブの作成に失敗しました。');
   return response.json() as Promise<OcrParseJobState>;
 }
@@ -227,6 +229,7 @@ export async function saveMasters(items: PriceMasterItem[]): Promise<PriceMaster
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
+        ...getWorkspaceHeaders(),
       },
       body: JSON.stringify({ items }),
     });
@@ -250,6 +253,7 @@ export async function generateReport(request: ReportGenerationRequest): Promise<
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...getWorkspaceHeaders(),
       },
       body: JSON.stringify(request),
     });
@@ -272,7 +276,9 @@ export async function generateReport(request: ReportGenerationRequest): Promise<
 
 export async function fetchConsensusBlueprint(): Promise<ConstructionConsensusBlueprint> {
   try {
-    const response = await fetch(resolveAppApiUrl('/api/ai/consensus/blueprint'));
+    const response = await fetch(resolveAppApiUrl('/api/ai/consensus/blueprint'), {
+      headers: getWorkspaceHeaders(),
+    });
     await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), 'AI設計情報の取得に失敗しました。');
     const payload = await response.json() as { data?: ConstructionConsensusBlueprint };
     if (!payload.data) {
@@ -302,6 +308,7 @@ export async function previewConsensusRequest(input: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...getWorkspaceHeaders(),
       },
       body: JSON.stringify(input),
     });
@@ -324,7 +331,9 @@ export async function previewConsensusRequest(input: {
 
 export async function fetchEstimationLogicBlueprint(): Promise<EstimationLogicBlueprint> {
   try {
-    const response = await fetch(resolveAppApiUrl('/api/ai/estimation-logic/blueprint'));
+    const response = await fetch(resolveAppApiUrl('/api/ai/estimation-logic/blueprint'), {
+      headers: getWorkspaceHeaders(),
+    });
     await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), '見積ロジック情報の取得に失敗しました。');
     const payload = await response.json() as { data?: EstimationLogicBlueprint };
     if (!payload.data) {
@@ -353,6 +362,7 @@ export async function previewEstimationLogicRequest(input: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...getWorkspaceHeaders(),
       },
       body: JSON.stringify(input),
     });
@@ -360,6 +370,38 @@ export async function previewEstimationLogicRequest(input: {
     const payload = await response.json() as { data?: EstimationLogicPreviewResponse };
     if (!payload.data) {
       throw new Error('見積ロジックの preview が返却されませんでした。');
+    }
+    return payload.data;
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {
+        throw new Error(getServerApiUnavailableMessage());
+      }
+      throw error;
+    }
+    throw new Error(getServerApiUnavailableMessage());
+  }
+}
+
+export async function runEstimationLogic(input: {
+  project: Project;
+  block: EstimateBlock;
+  drawing: Drawing | null;
+  effectiveDate?: string;
+}): Promise<EstimationLogicRunResponse> {
+  try {
+    const response = await fetch(resolveAppApiUrl('/api/ai/estimation-logic/run'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getWorkspaceHeaders(),
+      },
+      body: JSON.stringify(input),
+    });
+    await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), '見積ロジックの実行に失敗しました。');
+    const payload = await response.json() as { data?: EstimationLogicRunResponse };
+    if (!payload.data) {
+      throw new Error('見積ロジックの実行結果が返却されませんでした。');
     }
     return payload.data;
   } catch (error) {
