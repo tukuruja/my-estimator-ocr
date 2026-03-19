@@ -502,7 +502,6 @@ export function buildEstimationLogicOpenAiRequest(input: EstimationLogicPreviewI
   const context = buildEstimationLogicContext(input);
   return {
     model: 'gpt-4.1-mini',
-    reasoning: { effort: 'medium' },
     text: {
       format: {
         type: 'json_schema',
