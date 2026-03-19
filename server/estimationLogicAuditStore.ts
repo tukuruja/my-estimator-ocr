@@ -22,3 +22,31 @@ export async function writeEstimationLogicAuditLog(workspaceId: string, response
   await fs.writeFile(filePath, `${JSON.stringify(response, null, 2)}\n`, 'utf-8');
   return response.audit;
 }
+
+export async function listEstimationLogicAuditLogs(
+  workspaceId: string,
+  limit: number = 20,
+): Promise<EstimationLogicRunResponse[]> {
+  const auditDir = resolveAuditDir(workspaceId);
+  await fs.mkdir(auditDir, { recursive: true });
+
+  const entries = await fs.readdir(auditDir, { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => entry.name);
+
+  const loaded = await Promise.all(files.map(async (fileName) => {
+    const fullPath = path.join(auditDir, fileName);
+    const stat = await fs.stat(fullPath);
+    const raw = await fs.readFile(fullPath, 'utf-8');
+    return {
+      mtimeMs: stat.mtimeMs,
+      data: JSON.parse(raw) as EstimationLogicRunResponse,
+    };
+  }));
+
+  return loaded
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, limit)
+    .map((entry) => entry.data);
+}

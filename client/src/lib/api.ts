@@ -414,3 +414,24 @@ export async function runEstimationLogic(input: {
     throw new Error(getServerApiUnavailableMessage());
   }
 }
+
+export async function fetchEstimationLogicAuditLogs(limit: number = 20): Promise<EstimationLogicRunResponse[]> {
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    const response = await fetch(resolveAppApiUrl(`/api/ai/estimation-logic/audit-logs?${params.toString()}`), {
+      headers: getWorkspaceHeaders(),
+    });
+    await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), '見積ロジック監査ログの取得に失敗しました。');
+    const payload = await response.json() as { data?: EstimationLogicRunResponse[] };
+    return Array.isArray(payload.data) ? payload.data : [];
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {
+        throw new Error(getServerApiUnavailableMessage());
+      }
+      throw error;
+    }
+    throw new Error(getServerApiUnavailableMessage());
+  }
+}

@@ -125,6 +125,12 @@ export default function Header() {
           hoverColor="hover:bg-emerald-700"
           href="/ai-estimation-logic"
         />
+        <NavButton
+          label="🧾 監査ログ"
+          color="bg-sky-600"
+          hoverColor="hover:bg-sky-700"
+          href="/ai-estimation-audit"
+        />
       </nav>
     </header>
   );

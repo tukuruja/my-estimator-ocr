@@ -8,6 +8,7 @@ import Home from './pages/Home';
 import EstimateReportPage from './pages/EstimateReportPage';
 import ConsensusBlueprintPage from './pages/ConsensusBlueprintPage';
 import EstimatorLogicPage from './pages/EstimatorLogicPage';
+import EstimatorAuditPage from './pages/EstimatorAuditPage';
 import {
   ConcretePriceTable,
   RoadPriceTable,
@@ -51,6 +52,9 @@ function Router() {
       </Route>
       <Route path={'/ai-estimation-logic'}>
         <EstimatorLogicPage />
+      </Route>
+      <Route path={'/ai-estimation-audit'}>
+        <EstimatorAuditPage />
       </Route>
       <Route path={'/price-tables/concrete'} component={ConcretePriceTable} />
       <Route path={'/price-tables/road'} component={RoadPriceTable} />

@@ -11,7 +11,7 @@ import {
   ESTIMATION_LOGIC_BLUEPRINT,
   type EstimationLogicPreviewInput,
 } from '../shared/estimationLogic';
-import { writeEstimationLogicAuditLog } from './estimationLogicAuditStore';
+import { listEstimationLogicAuditLogs, writeEstimationLogicAuditLog } from './estimationLogicAuditStore';
 import { listMasterItems } from './masterStore';
 
 type Next = (err?: unknown) => void;
@@ -35,6 +35,10 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 
 function getPathname(req: IncomingMessage): string {
   return new URL(req.url || '/', 'http://localhost').pathname;
+}
+
+function getSearchParams(req: IncomingMessage): URLSearchParams {
+  return new URL(req.url || '/', 'http://localhost').searchParams;
 }
 
 interface PreviewRequestBody {
@@ -221,6 +225,15 @@ async function handleEstimationLogicApi(req: IncomingMessage, res: ServerRespons
     const body = await readJsonBody<PreviewRequestBody>(req);
     const preview = await buildPreviewResponse(body);
     sendJson(res, 200, { success: true, data: preview });
+    return true;
+  }
+
+  if (pathname === '/api/ai/estimation-logic/audit-logs' && method === 'GET') {
+    const params = getSearchParams(req);
+    const requestedLimit = Number(params.get('limit') || '20');
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 20;
+    const logs = await listEstimationLogicAuditLogs(getWorkspaceId(req), limit);
+    sendJson(res, 200, { success: true, data: logs });
     return true;
   }
 
