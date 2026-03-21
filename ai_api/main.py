@@ -133,8 +133,29 @@ WORK_TYPE_PATTERNS: dict[str, tuple[tuple[str, ...], str]] = {
     "secondary_product": (("U字溝", "側溝", "暗渠", "コネクトホール", "街渠", "縁塊", "桝", "マンホール"), "二次製品工"),
     "retaining_wall": (("擁壁", "L型", "重力式", "逆T", "控長", "根入れ", "水抜き"), "擁壁工"),
     "pavement": (("舗装", "路盤", "表層", "基層", "アスファルト", "切削", "不陸整正"), "舗装工"),
-    "demolition": (("撤去", "取壊", "はつり", "解体", "撤去工", "処分"), "撤去工"),
+    "demolition": (("撤去", "取壊", "はつり", "解体", "撤去工", "殻撤去", "取壊し"), "撤去工"),
 }
+
+BUSINESS_DOCUMENT_RULES: tuple[dict[str, Any], ...] = (
+    {
+        "documentType": "estimate",
+        "label": "見積書",
+        "title_keywords": ("見積書", "御見積", "御見積書"),
+        "body_keywords": ("見積金額", "御見積金額", "有効期限", "御中", "単価", "金額", "消費税"),
+    },
+    {
+        "documentType": "invoice",
+        "label": "請求書",
+        "title_keywords": ("請求書", "御請求書"),
+        "body_keywords": ("請求金額", "請求書", "振込先", "支払期限", "消費税", "御中"),
+    },
+    {
+        "documentType": "cover_letter",
+        "label": "通信文",
+        "title_keywords": ("通信文", "送付状", "案内文"),
+        "body_keywords": ("下記の通り", "送付", "ご確認", "御中"),
+    },
+)
 
 FULL_WIDTH_TRANS = str.maketrans({
     "０": "0",
@@ -298,7 +319,14 @@ def build_candidate(field_name: str, source_text: str, source_page: int, source_
     return payload
 
 
-def classify_work_types(ocr_items: list[dict[str, Any]], drawing_discipline: str | None = None) -> list[dict[str, Any]]:
+def classify_work_types(
+    ocr_items: list[dict[str, Any]],
+    drawing_discipline: str | None = None,
+    business_document: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    if business_document and business_document.get("isBusinessDocument"):
+        return []
+
     scored: list[dict[str, Any]] = []
     searchable_texts = [normalize_text(item["text"]) for item in ocr_items]
 
@@ -607,6 +635,46 @@ def infer_discipline(texts: list[str]) -> str:
     return "unknown"
 
 
+def detect_business_document(titleblock_meta: dict[str, Any], ocr_items: list[dict[str, Any]]) -> dict[str, Any]:
+    title = normalize_text(str(titleblock_meta.get("drawingTitle") or ""))
+    first_page_texts = [normalize_text(item["text"]) for item in page_items(ocr_items, 1)]
+    joined = "\n".join(first_page_texts)
+
+    best_document_type = "drawing"
+    best_label = "図面"
+    best_score = 0.0
+    best_reasons: list[str] = []
+
+    for rule in BUSINESS_DOCUMENT_RULES:
+        score = 0.0
+        reasons: list[str] = []
+
+        for keyword in rule["title_keywords"]:
+            if keyword in title:
+                score += 0.7
+                reasons.append(f"表題一致: {keyword}")
+
+        for keyword in rule["body_keywords"]:
+            if keyword in joined:
+                score += 0.12
+                reasons.append(f"本文一致: {keyword}")
+
+        if score > best_score:
+            best_score = score
+            best_document_type = str(rule["documentType"])
+            best_label = str(rule["label"])
+            best_reasons = reasons[:5]
+
+    is_business_document = best_score >= 0.72
+    return {
+        "isBusinessDocument": is_business_document,
+        "documentType": best_document_type if is_business_document else "drawing",
+        "label": best_label if is_business_document else "図面",
+        "confidence": round(min(best_score, 0.98), 4),
+        "reasons": best_reasons if is_business_document else [],
+    }
+
+
 def extract_titleblock_meta(ocr_items: list[dict[str, Any]], page_preview: dict[str, Any] | None) -> dict[str, Any]:
     texts = [item["text"] for item in select_titleblock_texts(ocr_items, page_preview)]
     fallback_texts = texts + [item["text"] for item in page_items(ocr_items, 1)]
@@ -641,7 +709,20 @@ def extract_titleblock_meta(ocr_items: list[dict[str, Any]], page_preview: dict[
     }
 
 
-def classify_sheet_type(ocr_items: list[dict[str, Any]], titleblock_meta: dict[str, Any]) -> dict[str, Any]:
+def classify_sheet_type(
+    ocr_items: list[dict[str, Any]],
+    titleblock_meta: dict[str, Any],
+    business_document: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if business_document and business_document.get("isBusinessDocument"):
+        return {
+            "sheetTypeId": f"document_{business_document['documentType']}",
+            "sheetTypeName": f"{business_document['label']}（帳票）",
+            "discipline": "common",
+            "classificationReasons": business_document.get("reasons", []) or ["帳票文書を検出"],
+            "confidence": business_document.get("confidence", 0.0),
+        }
+
     title = normalize_text(titleblock_meta.get("drawingTitle") or "")
     discipline_hint = titleblock_meta.get("discipline") or "unknown"
     searchable = "\n".join(normalize_text(item["text"]) for item in page_items(ocr_items, 1))
@@ -811,8 +892,17 @@ def build_review_queue(
     legend_resolution: dict[str, Any],
     work_type_candidates: list[dict[str, Any]],
     ocr_items: list[dict[str, Any]],
+    business_document: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     review_queue: list[dict[str, Any]] = []
+
+    if business_document and business_document.get("isBusinessDocument"):
+        review_queue.append(build_review_item(
+            "sheet_classification_review",
+            "critical",
+            "図面ではなく帳票文書を検出",
+            f"{business_document.get('label', '帳票文書')} の可能性が高いため、図面OCRとしての工種判定を停止しました。",
+        ))
 
     if media_route["preferredPipeline"] == "manual_review" or media_route["confidence"] < 0.85:
         review_queue.append(build_review_item(
@@ -1086,11 +1176,12 @@ def process_drawing_payload(
             all_ocr_items.extend(run_ocr_on_page(page_image, index))
 
     titleblock_meta = extract_titleblock_meta(all_ocr_items, page_previews[0] if page_previews else None)
-    sheet_classification = classify_sheet_type(all_ocr_items, titleblock_meta)
+    business_document = detect_business_document(titleblock_meta, all_ocr_items)
+    sheet_classification = classify_sheet_type(all_ocr_items, titleblock_meta, business_document)
     resolved_units = resolve_units_and_view(titleblock_meta, sheet_classification)
     legend_resolution = resolve_legend_and_abbreviations(all_ocr_items)
     ai_candidates = extract_candidates(all_ocr_items, mode)
-    work_type_candidates = classify_work_types(all_ocr_items, sheet_classification.get("discipline"))
+    work_type_candidates = classify_work_types(all_ocr_items, sheet_classification.get("discipline"), business_document)
     review_queue = build_review_queue(
         media_route,
         titleblock_meta,
@@ -1099,6 +1190,7 @@ def process_drawing_payload(
         legend_resolution,
         work_type_candidates,
         all_ocr_items,
+        business_document,
     )
 
     return {
@@ -1126,6 +1218,7 @@ def process_drawing_payload(
             "prompt_count": len(PROMPT_DEFINITIONS.get("prompts", [])),
             "knowledge_count": len(KNOWLEDGE_MASTER),
             "symbol_seed_count": len(SYMBOL_SEED_MASTER),
+            "business_document": business_document,
         },
     }
 
