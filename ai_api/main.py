@@ -204,6 +204,27 @@ def normalize_token(text: str) -> str:
     return re.sub(r"\s+", "", normalize_text(text)).upper()
 
 
+ROLE_TEXT_REPLACEMENTS = (
+    ("详", "詳"),
+    ("圖", "図"),
+    ("图", "図"),
+    ("區", "図"),
+    ("区", "図"),
+    ("现", "現"),
+    ("况", "況"),
+    ("計畫", "計画"),
+    ("计画", "計画"),
+    ("參", "参"),
+)
+
+
+def normalize_role_text(text: str) -> str:
+    normalized = normalize_token(text)
+    for source, target in ROLE_TEXT_REPLACEMENTS:
+        normalized = normalized.replace(source, target)
+    return normalized
+
+
 def is_dimension_like_text(text: str) -> bool:
     compact = normalize_text(text).replace(" ", "")
     return bool(re.fullmatch(r"[\d.xX×*]+", compact))
@@ -874,15 +895,53 @@ def resolve_legend_and_abbreviations(ocr_items: list[dict[str, Any]]) -> dict[st
     }
 
 
+def build_page_role_alias_map(page_role_keywords: dict[str, Any]) -> dict[str, list[str]]:
+    alias_map: dict[str, list[str]] = {}
+    extra_aliases = {
+        "plan": ["平面", "配置", "計画平面", "伏図"],
+        "section": ["断面", "横断", "縦断", "SECTION"],
+        "detail": ["詳細", "構造", "基礎詳細", "標準断面"],
+        "spec": ["仕様", "特記仕様", "標準図", "数量表", "材料表"],
+        "legend": ["凡例", "記号", "略号"],
+    }
+
+    for role, keywords in page_role_keywords.items():
+        aliases: set[str] = set()
+        for keyword in keywords:
+            if not isinstance(keyword, str) or not keyword.strip():
+                continue
+            normalized = normalize_role_text(keyword)
+            aliases.add(normalized)
+            if normalized.endswith("図"):
+                aliases.add(normalized[:-1])
+        for keyword in extra_aliases.get(role, []):
+            aliases.add(normalize_role_text(keyword))
+        alias_map[role] = sorted(alias for alias in aliases if alias)
+    return alias_map
+
+
+def infer_roles_from_text(text: str, role_alias_map: dict[str, list[str]]) -> list[dict[str, Any]]:
+    normalized = normalize_role_text(text)
+    roles: list[dict[str, Any]] = []
+    for role, aliases in role_alias_map.items():
+        matches = [alias for alias in aliases if alias in normalized]
+        if matches:
+            roles.append({
+                "role": role,
+                "keywords": matches[:5],
+                "confidence": round(min(0.95, 0.45 + len(matches) * 0.12), 4),
+            })
+    return sorted(roles, key=lambda entry: entry["confidence"], reverse=True)
+
+
 def extract_callout_key(text: str) -> str | None:
-    normalized = normalize_text(text)
+    normalized = normalize_role_text(text)
 
-    section_match = re.search(r"(?:断面|SECTION)?\s*([A-Z])\s*[-ー–]\s*([A-Z])", normalized, flags=re.IGNORECASE)
-    if section_match and section_match.group(1).upper() == section_match.group(2).upper():
-        token = section_match.group(1).upper()
-        return f"{token}-{token}"
+    callout_match = re.search(r"([A-Z0-9]{1,4})\s*[-ー–]\s*([A-Z0-9]{1,4})", normalized, flags=re.IGNORECASE)
+    if callout_match:
+        return f"{callout_match.group(1).upper()}-{callout_match.group(2).upper()}"
 
-    detail_match = re.search(r"(?:詳細|DETAIL)\s*([0-9A-Z]{1,4})", normalized, flags=re.IGNORECASE)
+    detail_match = re.search(r"(?:詳細(?:図)?|DETAIL)\s*([0-9A-Z]{1,4})", normalized, flags=re.IGNORECASE)
     if detail_match:
         return f"DETAIL-{detail_match.group(1).upper()}"
 
@@ -892,6 +951,7 @@ def extract_callout_key(text: str) -> str | None:
 def infer_plan_section_links(
     ocr_items: list[dict[str, Any]],
     page_roles: list[dict[str, Any]],
+    role_alias_map: dict[str, list[str]],
 ) -> list[dict[str, Any]]:
     role_map = {
         page_role["pageNo"]: [entry["role"] for entry in page_role.get("roles", [])]
@@ -904,7 +964,8 @@ def infer_plan_section_links(
         if not callout:
             continue
         page_no = int(item["page"])
-        roles = role_map.get(page_no, [])
+        item_roles = [entry["role"] for entry in infer_roles_from_text(item["text"], role_alias_map)]
+        roles = item_roles or role_map.get(page_no, [])
         if not roles:
             continue
         primary_role = roles[0]
@@ -922,11 +983,15 @@ def infer_plan_section_links(
         target_entries = [entry for entry in entries if entry["role"] in {"section", "detail"}]
         for plan_entry in plan_entries:
             for target_entry in target_entries:
-                if plan_entry["pageNo"] == target_entry["pageNo"]:
+                if plan_entry["pageNo"] == target_entry["pageNo"] and plan_entry["box"] == target_entry["box"]:
                     continue
-                confidence = round(min(0.96, 0.58 + min(plan_entry["confidence"], target_entry["confidence"]) * 0.3), 4)
+                same_page_bonus = -0.04 if plan_entry["pageNo"] == target_entry["pageNo"] else 0.0
+                confidence = round(
+                    min(0.96, 0.58 + min(plan_entry["confidence"], target_entry["confidence"]) * 0.3 + same_page_bonus),
+                    4,
+                )
                 links.append({
-                    "id": f"{callout}-{plan_entry['pageNo']}-{target_entry['pageNo']}",
+                    "id": f"{callout}-{plan_entry['pageNo']}-{target_entry['pageNo']}-{target_entry['role']}",
                     "callout": callout,
                     "sourcePageNo": plan_entry["pageNo"],
                     "sourceRole": plan_entry["role"],
@@ -938,15 +1003,20 @@ def infer_plan_section_links(
                     "targetBox": target_entry["box"],
                     "confidence": confidence,
                     "reasons": [
-                        f"plan page {plan_entry['pageNo']} と {target_entry['role']} page {target_entry['pageNo']} で同一 callout {callout} を検出",
+                        (
+                            f"plan page {plan_entry['pageNo']} と {target_entry['role']} page {target_entry['pageNo']}"
+                            if plan_entry["pageNo"] != target_entry["pageNo"]
+                            else f"page {plan_entry['pageNo']} 内で plan と {target_entry['role']}"
+                        )
+                        + f" の同一 callout {callout} を検出",
                     ],
                 })
 
     links.sort(key=lambda item: item["confidence"], reverse=True)
     deduped: list[dict[str, Any]] = []
-    seen: set[tuple[int, int, str]] = set()
+    seen: set[tuple[int, int, str, str]] = set()
     for link in links:
-        key = (link["sourcePageNo"], link["targetPageNo"], link["callout"])
+        key = (link["sourcePageNo"], link["targetPageNo"], link["callout"], link["targetRole"])
         if key in seen:
             continue
         seen.add(key)
@@ -959,6 +1029,7 @@ def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str,
     level_tokens = [normalize_token(token) for token in ARCHIVED_OCR_SKILL_PROFILE.get("levelTokens", [])]
     unit_patterns = ARCHIVED_OCR_SKILL_PROFILE.get("unitPatterns", [])
     page_role_keywords = ARCHIVED_OCR_SKILL_PROFILE.get("pageRoleKeywords", {})
+    role_alias_map = build_page_role_alias_map(page_role_keywords)
 
     parsed_text_blocks: list[dict[str, Any]] = []
     numeric_candidates: list[dict[str, Any]] = []
@@ -1062,21 +1133,13 @@ def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str,
     page_roles: list[dict[str, Any]] = []
     for page_no, page_texts in sorted(texts_by_page.items()):
         joined = "\n".join(page_texts)
-        roles: list[dict[str, Any]] = []
-        for role, keywords in page_role_keywords.items():
-            matches = [keyword for keyword in keywords if isinstance(keyword, str) and keyword and keyword in joined]
-            if matches:
-                roles.append({
-                    "role": role,
-                    "keywords": matches[:5],
-                    "confidence": round(min(0.95, 0.45 + len(matches) * 0.12), 4),
-                })
+        roles = infer_roles_from_text(joined, role_alias_map)
         page_roles.append({
             "pageNo": page_no,
             "roles": sorted(roles, key=lambda role: role["confidence"], reverse=True),
         })
 
-    plan_section_links = infer_plan_section_links(ocr_items, page_roles)
+    plan_section_links = infer_plan_section_links(ocr_items, page_roles, role_alias_map)
 
     unresolved_items: list[dict[str, Any]] = []
     if level_candidates and ambiguous_candidates:
