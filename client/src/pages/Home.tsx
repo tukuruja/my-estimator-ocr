@@ -940,6 +940,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
                       <div className="mt-1">高さ候補: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.levelCandidates.length}</span></div>
                       <div className="mt-1">寸法候補: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.dimensionCandidates.length}</span></div>
                       <div className="mt-1">watchlist: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.ambiguousCandidates.length}</span></div>
+                      <div className="mt-1">図面リンク: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.planSectionLinks.length}</span></div>
                     </>
                   )}
                 </div>

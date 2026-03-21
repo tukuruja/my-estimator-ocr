@@ -162,6 +162,20 @@ export interface DrawingOcrStructured {
       confidence: number;
     }>;
   }>;
+  planSectionLinks: Array<{
+    id: string;
+    callout: string;
+    sourcePageNo: number;
+    sourceRole: string;
+    sourceText: string;
+    sourceBox: BoundingBox;
+    targetPageNo: number;
+    targetRole: string;
+    targetText: string;
+    targetBox: BoundingBox;
+    confidence: number;
+    reasons: string[];
+  }>;
   unresolvedItems: Array<{
     target: string;
     reason: string;

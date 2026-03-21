@@ -874,6 +874,86 @@ def resolve_legend_and_abbreviations(ocr_items: list[dict[str, Any]]) -> dict[st
     }
 
 
+def extract_callout_key(text: str) -> str | None:
+    normalized = normalize_text(text)
+
+    section_match = re.search(r"(?:断面|SECTION)?\s*([A-Z])\s*[-ー–]\s*([A-Z])", normalized, flags=re.IGNORECASE)
+    if section_match and section_match.group(1).upper() == section_match.group(2).upper():
+        token = section_match.group(1).upper()
+        return f"{token}-{token}"
+
+    detail_match = re.search(r"(?:詳細|DETAIL)\s*([0-9A-Z]{1,4})", normalized, flags=re.IGNORECASE)
+    if detail_match:
+        return f"DETAIL-{detail_match.group(1).upper()}"
+
+    return None
+
+
+def infer_plan_section_links(
+    ocr_items: list[dict[str, Any]],
+    page_roles: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    role_map = {
+        page_role["pageNo"]: [entry["role"] for entry in page_role.get("roles", [])]
+        for page_role in page_roles
+    }
+    callout_candidates: dict[str, list[dict[str, Any]]] = {}
+
+    for item in ocr_items:
+        callout = extract_callout_key(item["text"])
+        if not callout:
+            continue
+        page_no = int(item["page"])
+        roles = role_map.get(page_no, [])
+        if not roles:
+            continue
+        primary_role = roles[0]
+        callout_candidates.setdefault(callout, []).append({
+            "pageNo": page_no,
+            "role": primary_role,
+            "text": item["text"],
+            "box": item["box"],
+            "confidence": item["score"],
+        })
+
+    links: list[dict[str, Any]] = []
+    for callout, entries in callout_candidates.items():
+        plan_entries = [entry for entry in entries if entry["role"] == "plan"]
+        target_entries = [entry for entry in entries if entry["role"] in {"section", "detail"}]
+        for plan_entry in plan_entries:
+            for target_entry in target_entries:
+                if plan_entry["pageNo"] == target_entry["pageNo"]:
+                    continue
+                confidence = round(min(0.96, 0.58 + min(plan_entry["confidence"], target_entry["confidence"]) * 0.3), 4)
+                links.append({
+                    "id": f"{callout}-{plan_entry['pageNo']}-{target_entry['pageNo']}",
+                    "callout": callout,
+                    "sourcePageNo": plan_entry["pageNo"],
+                    "sourceRole": plan_entry["role"],
+                    "sourceText": plan_entry["text"],
+                    "sourceBox": plan_entry["box"],
+                    "targetPageNo": target_entry["pageNo"],
+                    "targetRole": target_entry["role"],
+                    "targetText": target_entry["text"],
+                    "targetBox": target_entry["box"],
+                    "confidence": confidence,
+                    "reasons": [
+                        f"plan page {plan_entry['pageNo']} と {target_entry['role']} page {target_entry['pageNo']} で同一 callout {callout} を検出",
+                    ],
+                })
+
+    links.sort(key=lambda item: item["confidence"], reverse=True)
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[int, int, str]] = set()
+    for link in links:
+        key = (link["sourcePageNo"], link["targetPageNo"], link["callout"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(link)
+    return deduped[:40]
+
+
 def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str, Any]:
     watch_pairs = ARCHIVED_OCR_SKILL_PROFILE.get("ocrWatchPairs", [])
     level_tokens = [normalize_token(token) for token in ARCHIVED_OCR_SKILL_PROFILE.get("levelTokens", [])]
@@ -996,6 +1076,8 @@ def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str,
             "roles": sorted(roles, key=lambda role: role["confidence"], reverse=True),
         })
 
+    plan_section_links = infer_plan_section_links(ocr_items, page_roles)
+
     unresolved_items: list[dict[str, Any]] = []
     if level_candidates and ambiguous_candidates:
         unresolved_items.append({
@@ -1009,6 +1091,14 @@ def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str,
             "reason": "数値候補はありますが、単位文脈が弱いです。",
             "recommendedCheck": "m / mm / m2 / m3 の単位表記を図面から再確認してください。",
         })
+    plan_pages = [page_role for page_role in page_roles if any(role["role"] == "plan" for role in page_role.get("roles", []))]
+    section_or_detail_pages = [page_role for page_role in page_roles if any(role["role"] in {"section", "detail"} for role in page_role.get("roles", []))]
+    if plan_pages and section_or_detail_pages and not plan_section_links:
+        unresolved_items.append({
+            "target": "平面図と断面図/詳細図のリンク",
+            "reason": "pageRoles は抽出できていますが、callout ベースの図面リンクが見つかっていません。",
+            "recommendedCheck": "A-A/B-B や詳細番号の参照記号を図面間で確認してください。",
+        })
 
     return {
         "parsedTextBlocks": parsed_text_blocks[:200],
@@ -1020,6 +1110,7 @@ def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str,
         "lowConfidenceCandidates": low_confidence_candidates[:80],
         "ambiguousCandidates": ambiguous_candidates[:80],
         "pageRoles": page_roles,
+        "planSectionLinks": plan_section_links,
         "unresolvedItems": unresolved_items,
         "skillSources": ARCHIVED_OCR_SKILL_PROFILE.get("sourceSkills", []),
     }
@@ -1110,6 +1201,7 @@ def build_review_queue(
     if ocr_structured:
         ambiguous_candidates = ocr_structured.get("ambiguousCandidates", [])
         page_roles = ocr_structured.get("pageRoles", [])
+        plan_section_links = ocr_structured.get("planSectionLinks", [])
         unresolved_items = ocr_structured.get("unresolvedItems", [])
         if ambiguous_candidates:
             review_queue.append(build_review_item(
@@ -1125,6 +1217,13 @@ def build_review_queue(
                     "warning",
                     "図面役割の抽出が弱い",
                     "平面図・断面図・詳細図・凡例の役割候補が弱いため、後段の数量判定を慎重に扱ってください。",
+                ))
+            elif not plan_section_links:
+                review_queue.append(build_review_item(
+                    "sheet_classification_review",
+                    "warning",
+                    "平面図と断面図/詳細図のリンクが未解決",
+                    "pageRoles は抽出できていますが、参照記号ベースの図面リンクが未解決です。",
                 ))
         if unresolved_items:
             review_queue.append(build_review_item(

@@ -4,6 +4,7 @@ import type { AICandidate, BoundingBox, Drawing, OcrItem } from '@/lib/types';
 import OcrCanvas from './OcrCanvas';
 import OcrLineList from './OcrLineList';
 import CandidatePanel from './CandidatePanel';
+import OcrInsightPanel from './OcrInsightPanel';
 
 interface OcrReviewPanelProps {
   drawings: Drawing[];
@@ -55,6 +56,14 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
 }: OcrReviewPanelProps, ref) {
   const [selectedPageNo, setSelectedPageNo] = useState(1);
   const [zoom, setZoom] = useState(0.45);
+  const [structuredFocusBox, setStructuredFocusBox] = useState<BoundingBox | null>(null);
+  const [compareOverlays, setCompareOverlays] = useState<Array<{
+    id: string;
+    pageNo: number;
+    box: BoundingBox;
+    label: string;
+    tone?: 'amber' | 'emerald' | 'rose';
+  }>>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -80,9 +89,13 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
   useEffect(() => {
     if (!activeDrawing) {
       setSelectedPageNo(1);
+      setStructuredFocusBox(null);
+      setCompareOverlays([]);
       return;
     }
     setSelectedPageNo(activeDrawing.pages[0]?.pageNo ?? 1);
+    setStructuredFocusBox(null);
+    setCompareOverlays([]);
   }, [activeDrawing?.id]);
 
   const activeCandidate = activeDrawing?.aiCandidates.find((candidate) => candidate.id === activeCandidateId) ?? null;
@@ -100,11 +113,18 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
     }
   }, [activeItem?.id]);
 
+  useEffect(() => {
+    if (activeCandidate || activeItem) {
+      setStructuredFocusBox(null);
+      setCompareOverlays([]);
+    }
+  }, [activeCandidate?.id, activeItem?.id]);
+
   const activePage = activeDrawing?.pages.find((page) => page.pageNo === selectedPageNo) ?? null;
   const pageItems = activeDrawing ? derivePageItems(activeDrawing.ocrItems, selectedPageNo) : [];
   const pageCandidates = activeDrawing ? derivePageCandidates(activeDrawing.aiCandidates, selectedPageNo) : [];
 
-  const focusBox: BoundingBox | null = activeCandidate?.sourceBox ?? activeItem?.box ?? null;
+  const focusBox: BoundingBox | null = structuredFocusBox ?? activeCandidate?.sourceBox ?? activeItem?.box ?? null;
 
   return (
     <div ref={panelRef} className="flex h-full min-h-[720px] flex-col rounded-lg border border-slate-200 bg-white shadow-md">
@@ -244,13 +264,14 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
               items={pageItems}
               activeItemId={activeOcrItemId}
               focusBox={focusBox}
+              compareOverlays={compareOverlays}
               zoom={zoom}
               onSelectItem={onSelectOcrItem}
             />
           </div>
         </div>
 
-        <div className="grid min-h-0 gap-3 xl:grid-rows-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="grid min-h-0 gap-3 xl:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <OcrLineList
             items={pageItems}
             activeItemId={activeOcrItemId}
@@ -263,6 +284,20 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
             onHoverCandidate={onHoverCandidate}
             onApplyCandidate={onApplyCandidate}
             onApplyAllCandidates={onApplyAllCandidates}
+          />
+          <OcrInsightPanel
+            drawing={activeDrawing}
+            onFocusOverlaySet={(pageNo, box, overlays) => {
+              setSelectedPageNo(pageNo);
+              setStructuredFocusBox(box);
+              setCompareOverlays(overlays);
+              onSelectCandidate(null);
+              onSelectOcrItem(null);
+            }}
+            onClearOverlaySet={() => {
+              setStructuredFocusBox(null);
+              setCompareOverlays([]);
+            }}
           />
         </div>
       </div>

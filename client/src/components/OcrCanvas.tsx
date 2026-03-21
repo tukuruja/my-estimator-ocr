@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { BoundingBox, DrawingPage, OcrItem } from '@/lib/types';
 
+interface CompareOverlay {
+  id: string;
+  pageNo: number;
+  box: BoundingBox;
+  label: string;
+  tone?: 'amber' | 'emerald' | 'rose';
+}
+
 interface OcrCanvasProps {
   page: DrawingPage | null;
   items: OcrItem[];
   activeItemId: string | null;
   focusBox: BoundingBox | null;
+  compareOverlays?: CompareOverlay[];
   zoom: number;
   onSelectItem: (itemId: string | null) => void;
 }
@@ -25,7 +34,7 @@ function getRect(box: BoundingBox) {
   };
 }
 
-export default function OcrCanvas({ page, items, activeItemId, focusBox, zoom, onSelectItem }: OcrCanvasProps) {
+export default function OcrCanvas({ page, items, activeItemId, focusBox, compareOverlays = [], zoom, onSelectItem }: OcrCanvasProps) {
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
   const activeItem = useMemo(
@@ -47,6 +56,7 @@ export default function OcrCanvas({ page, items, activeItemId, focusBox, zoom, o
 
   const scaledWidth = page.width * zoom;
   const scaledHeight = page.height * zoom;
+  const pageCompareOverlays = compareOverlays.filter((overlay) => overlay.pageNo === page.pageNo);
 
   return (
     <div className="h-full overflow-auto rounded-md border border-slate-200 bg-slate-100">
@@ -94,6 +104,31 @@ export default function OcrCanvas({ page, items, activeItemId, focusBox, zoom, o
               }}
             />
           )}
+
+          {pageCompareOverlays.map((overlay, index) => {
+            const rect = getRect(overlay.box);
+            const toneClass = overlay.tone === 'emerald'
+              ? 'border-emerald-500 bg-emerald-400/10'
+              : overlay.tone === 'rose'
+                ? 'border-rose-500 bg-rose-400/10'
+                : 'border-amber-500 bg-amber-300/10';
+            return (
+              <div
+                key={overlay.id}
+                className={`pointer-events-none absolute rounded-md border-2 ${toneClass}`}
+                style={{
+                  left: rect.left * zoom,
+                  top: rect.top * zoom,
+                  width: rect.width * zoom,
+                  height: rect.height * zoom,
+                }}
+              >
+                <div className="absolute -top-5 left-0 rounded bg-slate-900/85 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                  {index + 1}. {overlay.label}
+                </div>
+              </div>
+            );
+          })}
 
           {activeItem && !focusBox && (
             <div
