@@ -280,6 +280,7 @@ function buildDrawingFromParseResponse(
     sheetClassification: payload.sheetClassification,
     resolvedUnits: payload.resolvedUnits,
     legendResolution: payload.legendResolution,
+    ocrStructured: payload.ocrStructured,
     workTypeCandidates: (payload.workTypeCandidates || []).map((candidate) => ({
       id: crypto.randomUUID(),
       blockType: candidate.blockType,
@@ -933,6 +934,14 @@ export default function Home({ preferredBlockType }: HomeProps) {
                   <div className="mt-1">シート分類: <span className="font-semibold text-slate-900">{activeDrawing.sheetClassification?.sheetTypeName ?? '未分類'}</span></div>
                   <div className="mt-1">分野: <span className="font-semibold text-slate-900">{activeDrawing.titleBlockMeta?.discipline ?? activeDrawing.sheetClassification?.discipline ?? 'unknown'}</span></div>
                   <div className="mt-1">単位: <span className="font-semibold text-slate-900">{activeDrawing.resolvedUnits?.lengthUnit ?? 'unknown'}</span></div>
+                  {activeDrawing.ocrStructured && (
+                    <>
+                      <div className="mt-1">役割候補: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.pageRoles.flatMap((page) => page.roles.map((role) => role.role)).slice(0, 4).join(' / ') || '未抽出'}</span></div>
+                      <div className="mt-1">高さ候補: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.levelCandidates.length}</span></div>
+                      <div className="mt-1">寸法候補: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.dimensionCandidates.length}</span></div>
+                      <div className="mt-1">watchlist: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.ambiguousCandidates.length}</span></div>
+                    </>
+                  )}
                 </div>
               )}
 

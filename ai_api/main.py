@@ -59,12 +59,19 @@ def load_pack_json(name: str, default: Any) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def load_local_json(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 SHEET_TYPE_MASTER = load_pack_json("sheet_type_master.json", [])
 ABBREVIATION_MASTER = load_pack_json("abbreviation_master.json", [])
 SYMBOL_SEED_MASTER = load_pack_json("symbol_seed_master.json", [])
 KNOWLEDGE_MASTER = load_pack_json("knowledge_master.json", [])
 PROMPT_DEFINITIONS = load_pack_json("prompt_definitions.json", {"prompts": []})
 SKILL_PACK = load_pack_json("skill_pack.json", {"review_queues": []})
+ARCHIVED_OCR_SKILL_PROFILE = load_local_json(BASE_DIR / "data" / "archived_ocr_skill_profile.json", {})
 
 KNOWN_REVIEW_QUEUES = set(SKILL_PACK.get("review_queues", []))
 ABBREVIATION_INDEX = {
@@ -867,6 +874,157 @@ def resolve_legend_and_abbreviations(ocr_items: list[dict[str, Any]]) -> dict[st
     }
 
 
+def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str, Any]:
+    watch_pairs = ARCHIVED_OCR_SKILL_PROFILE.get("ocrWatchPairs", [])
+    level_tokens = [normalize_token(token) for token in ARCHIVED_OCR_SKILL_PROFILE.get("levelTokens", [])]
+    unit_patterns = ARCHIVED_OCR_SKILL_PROFILE.get("unitPatterns", [])
+    page_role_keywords = ARCHIVED_OCR_SKILL_PROFILE.get("pageRoleKeywords", {})
+
+    parsed_text_blocks: list[dict[str, Any]] = []
+    numeric_candidates: list[dict[str, Any]] = []
+    unit_candidates: list[dict[str, Any]] = []
+    level_candidates: list[dict[str, Any]] = []
+    dimension_candidates: list[dict[str, Any]] = []
+    table_candidates: list[dict[str, Any]] = []
+    low_confidence_candidates: list[dict[str, Any]] = []
+    ambiguous_candidates: list[dict[str, Any]] = []
+
+    texts_by_page: dict[int, list[str]] = {}
+
+    for item in ocr_items:
+        text = str(item["text"])
+        normalized = normalize_text(text)
+        token = normalize_token(text)
+        texts_by_page.setdefault(item["page"], []).append(normalized)
+
+        parsed_text_blocks.append({
+            "pageNo": item["page"],
+            "text": text,
+            "normalizedText": normalized,
+            "bbox": item["box"],
+            "confidence": item["score"],
+        })
+
+        for number in re.findall(r"[-+]?\d+(?:\.\d+)?", normalized):
+            numeric_candidates.append({
+                "pageNo": item["page"],
+                "text": text,
+                "value": number,
+                "bbox": item["box"],
+                "confidence": item["score"],
+            })
+
+        for entry in unit_patterns:
+            unit = entry.get("unit")
+            for pattern in entry.get("patterns", []):
+                if isinstance(pattern, str) and pattern and pattern.lower() in normalized.lower():
+                    unit_candidates.append({
+                        "pageNo": item["page"],
+                        "text": text,
+                        "unit": unit,
+                        "matchedPattern": pattern,
+                        "bbox": item["box"],
+                        "confidence": item["score"],
+                    })
+                    break
+
+        for raw_token in level_tokens:
+            if raw_token and raw_token in token:
+                level_match = re.search(r"([-+]?\d+(?:\.\d+)?)", normalized)
+                level_candidates.append({
+                    "pageNo": item["page"],
+                    "text": text,
+                    "token": raw_token,
+                    "value": level_match.group(1) if level_match else None,
+                    "bbox": item["box"],
+                    "confidence": item["score"],
+                })
+                break
+
+        dimension_match = re.search(r"(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:[xX×*]\s*(\d+(?:\.\d+)?))?", normalized)
+        if dimension_match:
+            dimension_candidates.append({
+                "pageNo": item["page"],
+                "text": text,
+                "values": [value for value in dimension_match.groups() if value is not None],
+                "bbox": item["box"],
+                "confidence": item["score"],
+            })
+
+        if len(re.findall(r"[-+]?\d+(?:\.\d+)?", normalized)) >= 2 or any(keyword in normalized for keyword in ["数量", "単価", "金額", "合計"]):
+            table_candidates.append({
+                "pageNo": item["page"],
+                "text": text,
+                "bbox": item["box"],
+                "confidence": item["score"],
+            })
+
+        if item["score"] < OCR_REVIEW_SCORE_THRESHOLD:
+            low_confidence_candidates.append({
+                "pageNo": item["page"],
+                "text": text,
+                "bbox": item["box"],
+                "confidence": item["score"],
+            })
+
+        for group in watch_pairs:
+            normalized_group = [normalize_token(str(term)) for term in group if str(term).strip()]
+            if any(term and term in token for term in normalized_group):
+                ambiguous_candidates.append({
+                    "pageNo": item["page"],
+                    "text": text,
+                    "watchGroup": list(group),
+                    "bbox": item["box"],
+                    "confidence": item["score"],
+                })
+                break
+
+    page_roles: list[dict[str, Any]] = []
+    for page_no, page_texts in sorted(texts_by_page.items()):
+        joined = "\n".join(page_texts)
+        roles: list[dict[str, Any]] = []
+        for role, keywords in page_role_keywords.items():
+            matches = [keyword for keyword in keywords if isinstance(keyword, str) and keyword and keyword in joined]
+            if matches:
+                roles.append({
+                    "role": role,
+                    "keywords": matches[:5],
+                    "confidence": round(min(0.95, 0.45 + len(matches) * 0.12), 4),
+                })
+        page_roles.append({
+            "pageNo": page_no,
+            "roles": sorted(roles, key=lambda role: role["confidence"], reverse=True),
+        })
+
+    unresolved_items: list[dict[str, Any]] = []
+    if level_candidates and ambiguous_candidates:
+        unresolved_items.append({
+            "target": "基準高ラベル",
+            "reason": "GL/FH/EL 系の OCR 競合が残っています。",
+            "recommendedCheck": "原図と断面図の高さラベルを確認してください。",
+        })
+    if numeric_candidates and not unit_candidates:
+        unresolved_items.append({
+            "target": "単位未確定の数値",
+            "reason": "数値候補はありますが、単位文脈が弱いです。",
+            "recommendedCheck": "m / mm / m2 / m3 の単位表記を図面から再確認してください。",
+        })
+
+    return {
+        "parsedTextBlocks": parsed_text_blocks[:200],
+        "numericCandidates": numeric_candidates[:120],
+        "unitCandidates": unit_candidates[:80],
+        "levelCandidates": level_candidates[:80],
+        "dimensionCandidates": dimension_candidates[:80],
+        "tableCandidates": table_candidates[:80],
+        "lowConfidenceCandidates": low_confidence_candidates[:80],
+        "ambiguousCandidates": ambiguous_candidates[:80],
+        "pageRoles": page_roles,
+        "unresolvedItems": unresolved_items,
+        "skillSources": ARCHIVED_OCR_SKILL_PROFILE.get("sourceSkills", []),
+    }
+
+
 def build_review_item(queue: str, severity: str, title: str, detail: str, source_text: str | None = None, source_page: int | None = None, field_name: str | None = None) -> dict[str, Any]:
     queue_name = queue if queue in KNOWN_REVIEW_QUEUES else queue
     payload = {
@@ -893,6 +1051,7 @@ def build_review_queue(
     work_type_candidates: list[dict[str, Any]],
     ocr_items: list[dict[str, Any]],
     business_document: dict[str, Any] | None = None,
+    ocr_structured: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     review_queue: list[dict[str, Any]] = []
 
@@ -947,6 +1106,33 @@ def build_review_queue(
             "未登録の略号または記号があります",
             f"未解決語: {', '.join(legend_resolution['unknownTerms'][:5])}",
         ))
+
+    if ocr_structured:
+        ambiguous_candidates = ocr_structured.get("ambiguousCandidates", [])
+        page_roles = ocr_structured.get("pageRoles", [])
+        unresolved_items = ocr_structured.get("unresolvedItems", [])
+        if ambiguous_candidates:
+            review_queue.append(build_review_item(
+                "ocr_router_review",
+                "warning",
+                "OCR watchlist に該当する候補あり",
+                f"GL/GI/FH などの競合候補が {len(ambiguous_candidates)} 件あります。",
+            ))
+        if not business_document or not business_document.get("isBusinessDocument"):
+            if page_roles and all(not page_role.get("roles") for page_role in page_roles):
+                review_queue.append(build_review_item(
+                    "sheet_classification_review",
+                    "warning",
+                    "図面役割の抽出が弱い",
+                    "平面図・断面図・詳細図・凡例の役割候補が弱いため、後段の数量判定を慎重に扱ってください。",
+                ))
+        if unresolved_items:
+            review_queue.append(build_review_item(
+                "unit_scale_review",
+                "warning",
+                "未解決 OCR 項目があります",
+                " / ".join(str(item.get("target")) for item in unresolved_items[:3]),
+            ))
 
     low_confidence_item = next((item for item in ocr_items if item["score"] < OCR_REVIEW_SCORE_THRESHOLD), None)
     if low_confidence_item:
@@ -1180,6 +1366,7 @@ def process_drawing_payload(
     sheet_classification = classify_sheet_type(all_ocr_items, titleblock_meta, business_document)
     resolved_units = resolve_units_and_view(titleblock_meta, sheet_classification)
     legend_resolution = resolve_legend_and_abbreviations(all_ocr_items)
+    ocr_structured = extract_structured_ocr_signals(all_ocr_items)
     ai_candidates = extract_candidates(all_ocr_items, mode)
     work_type_candidates = classify_work_types(all_ocr_items, sheet_classification.get("discipline"), business_document)
     review_queue = build_review_queue(
@@ -1191,6 +1378,7 @@ def process_drawing_payload(
         work_type_candidates,
         all_ocr_items,
         business_document,
+        ocr_structured,
     )
 
     return {
@@ -1204,6 +1392,7 @@ def process_drawing_payload(
         "sheetClassification": sheet_classification,
         "resolvedUnits": resolved_units,
         "legendResolution": legend_resolution,
+        "ocrStructured": ocr_structured,
         "reviewQueue": review_queue,
         "aiCandidates": ai_candidates,
         "workTypeCandidates": work_type_candidates,

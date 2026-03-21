@@ -124,6 +124,52 @@ export interface DrawingLegendResolution {
   unknownTerms: string[];
 }
 
+export interface DrawingOcrStructuredCandidate {
+  pageNo: number;
+  text: string;
+  bbox: BoundingBox;
+  confidence: number;
+}
+
+export interface DrawingOcrStructured {
+  parsedTextBlocks: Array<DrawingOcrStructuredCandidate & {
+    normalizedText: string;
+  }>;
+  numericCandidates: Array<DrawingOcrStructuredCandidate & {
+    value: string;
+  }>;
+  unitCandidates: Array<DrawingOcrStructuredCandidate & {
+    unit: string;
+    matchedPattern: string;
+  }>;
+  levelCandidates: Array<DrawingOcrStructuredCandidate & {
+    token: string;
+    value: string | null;
+  }>;
+  dimensionCandidates: Array<DrawingOcrStructuredCandidate & {
+    values: string[];
+  }>;
+  tableCandidates: DrawingOcrStructuredCandidate[];
+  lowConfidenceCandidates: DrawingOcrStructuredCandidate[];
+  ambiguousCandidates: Array<DrawingOcrStructuredCandidate & {
+    watchGroup: string[];
+  }>;
+  pageRoles: Array<{
+    pageNo: number;
+    roles: Array<{
+      role: string;
+      keywords: string[];
+      confidence: number;
+    }>;
+  }>;
+  unresolvedItems: Array<{
+    target: string;
+    reason: string;
+    recommendedCheck: string;
+  }>;
+  skillSources: string[];
+}
+
 export interface PriceMasterItem {
   id: string;
   masterType: MasterType;
@@ -212,6 +258,7 @@ export interface Drawing {
   sheetClassification?: DrawingSheetClassification;
   resolvedUnits?: DrawingResolvedUnits;
   legendResolution?: DrawingLegendResolution;
+  ocrStructured?: DrawingOcrStructured;
   reviewQueue: OcrReviewQueueItem[];
   uploadedAt: string;
   lastParsedAt?: string;
@@ -413,6 +460,7 @@ export interface ParseDrawingResponse {
   sheetClassification?: DrawingSheetClassification;
   resolvedUnits?: DrawingResolvedUnits;
   legendResolution?: DrawingLegendResolution;
+  ocrStructured?: DrawingOcrStructured;
   reviewQueue?: Array<{
     queue: string;
     severity: OcrReviewQueueSeverity;
