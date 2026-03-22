@@ -937,11 +937,13 @@ def infer_roles_from_text(text: str, role_alias_map: dict[str, list[str]]) -> li
 def extract_callout_key(text: str) -> str | None:
     normalized = normalize_role_text(text)
 
-    callout_match = re.search(r"([A-Z0-9]{1,4})\s*[-ー–]\s*([A-Z0-9]{1,4})", normalized, flags=re.IGNORECASE)
-    if callout_match:
-        return f"{callout_match.group(1).upper()}-{callout_match.group(2).upper()}"
+    multi_segment_match = re.search(r"([A-Z0-9]{1,8}(?:\s*[-ー–]\s*[A-Z0-9]{1,8}){1,4})", normalized, flags=re.IGNORECASE)
+    if multi_segment_match:
+        parts = [segment for segment in re.split(r"\s*[-ー–]\s*", multi_segment_match.group(1).upper()) if segment]
+        if len(parts) >= 2:
+            return "-".join(parts)
 
-    detail_match = re.search(r"(?:詳細(?:図)?|DETAIL)\s*([0-9A-Z]{1,4})", normalized, flags=re.IGNORECASE)
+    detail_match = re.search(r"(?:詳細(?:図)?|DETAIL)\s*[-ー–]?\s*(?:NO\.?|№)?\s*([0-9A-Z]{1,6})", normalized, flags=re.IGNORECASE)
     if detail_match:
         return f"DETAIL-{detail_match.group(1).upper()}"
 

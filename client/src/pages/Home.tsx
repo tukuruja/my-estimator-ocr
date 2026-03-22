@@ -11,6 +11,7 @@ import DocumentPanel from '@/components/DocumentPanel';
 import { calculate } from '@/lib/calculations';
 import { fetchMasters, generateReport, getAiApiUnavailableMessage, isAiApiAvailable, parseDrawing, runEstimationLogic, type OcrParseJobState } from '@/lib/api';
 import { canonicalizeMasterName, createSeedMasterItems } from '@/lib/masterData';
+import { buildLevelConflictGroups, groupPlanSectionLinksByCallout, isLevelWatchGroup } from '@/lib/ocrInsights';
 import {
   createDefaultBlock,
   createDefaultProject,
@@ -18,7 +19,9 @@ import {
   type AICandidate,
   type AppState,
   type BlockType,
+  type BoundingBox,
   type Drawing,
+  type DrawingManualResolution,
   type EstimateBlock,
   type GeneratedReportBundle,
   type MasterType,
@@ -300,9 +303,119 @@ function buildDrawingFromParseResponse(
       sourcePage: item.sourcePage,
       fieldName: item.fieldName,
     })),
+    manualResolutions: [],
     uploadedAt: new Date().toISOString(),
     lastParsedAt: new Date().toISOString(),
   };
+}
+
+function upsertManualResolution(
+  resolutions: DrawingManualResolution[],
+  resolution: Omit<DrawingManualResolution, 'id' | 'resolvedAt'>,
+): DrawingManualResolution[] {
+  const nextResolution: DrawingManualResolution = {
+    ...resolution,
+    id: crypto.randomUUID(),
+    resolvedAt: new Date().toISOString(),
+  };
+  return [
+    ...resolutions.filter((item) => !(item.resolutionType === resolution.resolutionType && item.resolutionKey === resolution.resolutionKey)),
+    nextResolution,
+  ];
+}
+
+function resolveFieldForLevelGroup(groupId: string): keyof EstimateBlock | null {
+  if (groupId.includes('GL') || groupId.includes('GI') || groupId.includes('G1') || groupId.includes('現況高')) {
+    return 'currentHeight';
+  }
+  if (groupId === 'FH' || groupId.includes('計画高') || groupId.includes('計画GL')) {
+    return 'plannedHeight';
+  }
+  return null;
+}
+
+function deriveDrawingReviewQueue(drawing: Drawing | null): OcrReviewQueueItem[] {
+  if (!drawing) return [];
+
+  const ocrStructured = drawing.ocrStructured;
+  const manualResolutions = drawing.manualResolutions ?? [];
+  const resolvedLevelKeys = new Set(
+    manualResolutions
+      .filter((item) => item.resolutionType === 'level_conflict')
+      .map((item) => item.resolutionKey),
+  );
+  const resolvedLinkKeys = new Set(
+    manualResolutions
+      .filter((item) => item.resolutionType === 'plan_section_link')
+      .map((item) => item.resolutionKey),
+  );
+
+  const unresolvedLevelGroups = buildLevelConflictGroups(ocrStructured).filter((group) => !resolvedLevelKeys.has(group.id));
+  const unresolvedLinkGroups = groupPlanSectionLinksByCallout(ocrStructured).filter((group) => !resolvedLinkKeys.has(group.callout));
+  const remainingUnresolvedTargets = (ocrStructured?.unresolvedItems ?? []).filter((item) => {
+    if (item.target === '基準高ラベル') {
+      return unresolvedLevelGroups.length > 0;
+    }
+    if (item.target === '平面図と断面図/詳細図のリンク') {
+      return unresolvedLinkGroups.length > 0;
+    }
+    return true;
+  });
+  const nonLevelAmbiguousCount = (ocrStructured?.ambiguousCandidates ?? []).filter((candidate) => !isLevelWatchGroup(candidate.watchGroup)).length;
+
+  const retainedBaseQueue = drawing.reviewQueue.filter((item) => ![
+    'OCR watchlist に該当する候補あり',
+    '平面図と断面図/詳細図のリンクが未解決',
+    '未解決 OCR 項目があります',
+  ].includes(item.title));
+
+  const derivedItems: OcrReviewQueueItem[] = [];
+
+  if (nonLevelAmbiguousCount > 0) {
+    derivedItems.push({
+      id: 'derived-watchlist',
+      queue: 'ocr_router_review',
+      severity: 'warning',
+      title: 'OCR watchlist に該当する候補あり',
+      detail: `高さラベル以外の watchlist 候補が ${nonLevelAmbiguousCount} 件あります。`,
+    });
+  }
+
+  unresolvedLevelGroups.forEach((group) => {
+    derivedItems.push({
+      id: `level-${group.id}`,
+      queue: 'ocr_router_review',
+      severity: 'warning',
+      title: '高さラベル候補を確認',
+      detail: `${group.label} の候補が ${group.items.length} 件あります。bbox 比較から採用してください。`,
+      fieldName: resolveFieldForLevelGroup(group.id) ?? undefined,
+    });
+  });
+
+  unresolvedLinkGroups.forEach((group) => {
+    derivedItems.push({
+      id: `link-${group.callout}`,
+      queue: 'sheet_classification_review',
+      severity: 'info',
+      title: '図面リンク候補を確認',
+      detail: `${group.callout} の平面図 / 断面図 / 詳細図リンク候補が ${group.links.length} 件あります。採用して閉じてください。`,
+    });
+  });
+
+  const otherUnresolvedTargets = remainingUnresolvedTargets
+    .map((item) => item.target)
+    .filter((target) => target !== '基準高ラベル' && target !== '平面図と断面図/詳細図のリンク');
+  if (otherUnresolvedTargets.length > 0) {
+    derivedItems.push({
+      id: 'derived-unresolved',
+      queue: 'unit_scale_review',
+      severity: 'warning',
+      title: '未解決 OCR 項目があります',
+      detail: otherUnresolvedTargets.slice(0, 3).join(' / '),
+    });
+  }
+
+  return [...retainedBaseQueue, ...derivedItems];
 }
 
 function applyCandidateValue(block: EstimateBlock, candidate: AICandidate, drawingId: string | null): EstimateBlock {
@@ -443,7 +556,16 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const effectiveDate = new Date().toISOString().slice(0, 10);
   const uploadDisabledReason = isAiApiAvailable() ? null : getAiApiUnavailableMessage();
   const result = useMemo(() => (activeBlock ? calculate(activeBlock, { masters, effectiveDate }) : null), [activeBlock, effectiveDate, masters]);
-  const activeReviewQueue = activeDrawing?.reviewQueue ?? [];
+  const activeManualResolutions = activeDrawing?.manualResolutions ?? [];
+  const resolvedLevelKeys = useMemo(
+    () => activeManualResolutions.filter((item) => item.resolutionType === 'level_conflict').map((item) => item.resolutionKey),
+    [activeManualResolutions],
+  );
+  const resolvedLinkKeys = useMemo(
+    () => activeManualResolutions.filter((item) => item.resolutionType === 'plan_section_link').map((item) => item.resolutionKey),
+    [activeManualResolutions],
+  );
+  const activeReviewQueue = useMemo(() => deriveDrawingReviewQueue(activeDrawing), [activeDrawing]);
 
   useEffect(() => {
     if (!activeProject || !activeBlock) {
@@ -780,6 +902,82 @@ export default function Home({ preferredBlockType }: HomeProps) {
     }
   }, []);
 
+  const handleAdoptLevelCandidate = useCallback((
+    groupId: string,
+    item: { pageNo: number; box: BoundingBox; text: string; value: string | null },
+  ) => {
+    if (!activeProject || !activeDrawing || !activeBlock) return;
+
+    const fieldName = resolveFieldForLevelGroup(groupId);
+    const numericValue = item.value !== null ? Number(item.value) : null;
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => (
+        drawing.id !== activeDrawing.id
+          ? drawing
+          : {
+              ...drawing,
+              manualResolutions: upsertManualResolution(drawing.manualResolutions ?? [], {
+                resolutionType: 'level_conflict',
+                resolutionKey: groupId,
+                title: `高さラベル採用: ${groupId}`,
+                selectedText: item.text,
+                selectedPageNo: item.pageNo,
+                selectedBox: item.box,
+                appliedFieldName: fieldName ?? undefined,
+                appliedValue: Number.isFinite(numericValue) ? numericValue : item.value,
+                note: fieldName ? `${CANDIDATE_LABELS[fieldName] || fieldName} へ採用` : 'レビュー解消のみ',
+              }),
+            }
+      )),
+      blocks: project.blocks.map((block) => {
+        if (block.id !== activeBlock.id) return block;
+        if (!fieldName || !Number.isFinite(numericValue)) return block;
+        return {
+          ...block,
+          drawingId: activeDrawing.id,
+          [fieldName]: numericValue,
+          requiresReviewFields: block.requiresReviewFields.filter((field) => field !== fieldName),
+        };
+      }),
+    }));
+
+    toast.success(
+      fieldName && Number.isFinite(numericValue)
+        ? `「${item.text}」を ${CANDIDATE_LABELS[fieldName] || fieldName} へ採用しました。`
+        : `「${item.text}」を採用し、review queue を閉じました。`,
+    );
+  }, [activeBlock, activeDrawing, activeProject, replaceActiveProject]);
+
+  const handleAdoptPlanSectionLink = useCallback((callout: string, linkId: string) => {
+    if (!activeProject || !activeDrawing) return;
+    const selectedLink = activeDrawing.ocrStructured?.planSectionLinks.find((item) => item.id === linkId);
+    if (!selectedLink) return;
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => (
+        drawing.id !== activeDrawing.id
+          ? drawing
+          : {
+              ...drawing,
+              manualResolutions: upsertManualResolution(drawing.manualResolutions ?? [], {
+                resolutionType: 'plan_section_link',
+                resolutionKey: callout,
+                title: `図面リンク採用: ${callout}`,
+                selectedText: `${selectedLink.sourceText} -> ${selectedLink.targetText}`,
+                selectedPageNo: selectedLink.sourcePageNo,
+                selectedBox: selectedLink.sourceBox,
+                note: `${selectedLink.sourceRole} p.${selectedLink.sourcePageNo} と ${selectedLink.targetRole} p.${selectedLink.targetPageNo} を採用`,
+              }),
+            }
+      )),
+    }));
+
+    toast.success(`「${callout}」の図面リンクを採用し、review queue を閉じました。`);
+  }, [activeDrawing, activeProject, replaceActiveProject]);
+
   if (!initialized || !appState || !activeProject || !activeBlock || !result) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -902,6 +1100,10 @@ export default function Home({ preferredBlockType }: HomeProps) {
             onHoverCandidate={handleHoverCandidate}
             onApplyCandidate={handleApplyCandidate}
             onApplyAllCandidates={handleApplyAllCandidates}
+            resolvedLevelKeys={resolvedLevelKeys}
+            resolvedLinkKeys={resolvedLinkKeys}
+            onAdoptLevelCandidate={handleAdoptLevelCandidate}
+            onAdoptPlanSectionLink={handleAdoptPlanSectionLink}
           />
 
           <div className="space-y-2">

@@ -34,6 +34,16 @@
     "spec": ["仕様", "特記仕様", "標準図", "数量表", "材料表"],
     "legend": ["凡例", "記号", "略号"]
   },
+  "calloutPatterns": [
+    "A-A",
+    "B-B",
+    "C-C",
+    "詳細1",
+    "詳細-1",
+    "DETAIL 1",
+    "00-19-1143",
+    "QF-ADT-F-001-00"
+  ],
   "safetyGate": {
     "requireEvidenceForConfirmedQuantities": true,
     "stopOnWeakSectionEvidence": true,

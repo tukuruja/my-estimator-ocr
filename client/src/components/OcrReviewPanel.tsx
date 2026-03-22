@@ -22,6 +22,10 @@ interface OcrReviewPanelProps {
   onHoverCandidate: (candidateId: string | null) => void;
   onApplyCandidate: (candidateId: string) => void;
   onApplyAllCandidates: () => void;
+  resolvedLevelKeys: string[];
+  resolvedLinkKeys: string[];
+  onAdoptLevelCandidate: (groupId: string, item: { pageNo: number; box: BoundingBox; text: string; value: string | null }) => void;
+  onAdoptPlanSectionLink: (callout: string, linkId: string) => void;
 }
 
 export interface OcrReviewPanelHandle {
@@ -53,6 +57,10 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
   onHoverCandidate,
   onApplyCandidate,
   onApplyAllCandidates,
+  resolvedLevelKeys,
+  resolvedLinkKeys,
+  onAdoptLevelCandidate,
+  onAdoptPlanSectionLink,
 }: OcrReviewPanelProps, ref) {
   const [selectedPageNo, setSelectedPageNo] = useState(1);
   const [zoom, setZoom] = useState(0.45);
@@ -287,6 +295,8 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
           />
           <OcrInsightPanel
             drawing={activeDrawing}
+            resolvedLevelKeys={resolvedLevelKeys}
+            resolvedLinkKeys={resolvedLinkKeys}
             onFocusOverlaySet={(pageNo, box, overlays) => {
               setSelectedPageNo(pageNo);
               setStructuredFocusBox(box);
@@ -298,6 +308,8 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
               setStructuredFocusBox(null);
               setCompareOverlays([]);
             }}
+            onAdoptLevelCandidate={onAdoptLevelCandidate}
+            onAdoptPlanSectionLink={onAdoptPlanSectionLink}
           />
         </div>
       </div>

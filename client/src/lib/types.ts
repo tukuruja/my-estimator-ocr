@@ -73,6 +73,20 @@ export interface OcrReviewQueueItem {
   fieldName?: string;
 }
 
+export interface DrawingManualResolution {
+  id: string;
+  resolutionType: 'level_conflict' | 'plan_section_link';
+  resolutionKey: string;
+  title: string;
+  selectedText: string;
+  selectedPageNo: number;
+  selectedBox: BoundingBox;
+  appliedFieldName?: string;
+  appliedValue?: string | number | null;
+  note?: string;
+  resolvedAt: string;
+}
+
 export interface DrawingMediaRoute {
   sourceMediaType: 'cad' | 'ifc' | 'vector_pdf' | 'raster_pdf' | 'image' | 'unknown';
   preferredPipeline: 'direct_text' | 'vector_parse' | 'ocr_cv' | 'manual_review';
@@ -274,6 +288,7 @@ export interface Drawing {
   legendResolution?: DrawingLegendResolution;
   ocrStructured?: DrawingOcrStructured;
   reviewQueue: OcrReviewQueueItem[];
+  manualResolutions: DrawingManualResolution[];
   uploadedAt: string;
   lastParsedAt?: string;
   lastError?: string;
@@ -571,6 +586,7 @@ export function createDefaultDrawing(projectId: string, name: string = '図面�
     aiCandidates: [],
     workTypeCandidates: [],
     reviewQueue: [],
+    manualResolutions: [],
     uploadedAt: new Date().toISOString(),
   };
 }
