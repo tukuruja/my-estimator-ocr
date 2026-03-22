@@ -31,6 +31,7 @@ import {
 } from '@/lib/api';
 import { canonicalizeMasterName, createSeedMasterItems } from '@/lib/masterData';
 import { buildLevelConflictGroups, groupPlanSectionLinksByCallout, isLevelWatchGroup } from '@/lib/ocrInsights';
+import { productLengths } from '@/lib/priceData';
 import {
   createDefaultBlock,
   createDefaultEstimateZone,
@@ -59,6 +60,7 @@ import {
 import { loadData, saveData } from '@/lib/storage';
 import { getWorkTypeLabel } from '@/lib/workTypes';
 import type { EstimationLogicRunResponse } from '@shared/estimationLogic';
+import { getShiroyamaLogicForBlockType, SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC } from '@shared/shiroyamaExteriorEstimateLogic';
 import { toast } from 'sonner';
 
 const CANDIDATE_LABELS: Record<string, string> = {
@@ -226,6 +228,32 @@ function EstimationLogicCard({ run, loading, error }: { run: EstimationLogicRunR
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function WorkbookLogicCard({ blockType }: { blockType: BlockType }) {
+  const rules = getShiroyamaLogicForBlockType(blockType);
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="text-sm font-semibold text-slate-800">今回の内訳一致ロジック</div>
+      <div className="mt-1 text-[11px] leading-5 text-slate-500">
+        {SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC.projectLabel} の内訳書と図面から整理した数量解釈です。
+      </div>
+      <div className="mt-3 space-y-3">
+        {rules.map((rule) => (
+          <div key={rule.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{rule.title}</div>
+            <div className="mt-1 text-sm leading-6 text-slate-800">{rule.interpretation}</div>
+            <div className="mt-2 text-xs font-semibold text-slate-700">式: {rule.formula}</div>
+            <div className="mt-2 space-y-1">
+              {rule.workbookExamples.map((example) => (
+                <div key={example} className="text-[11px] leading-5 text-slate-600">・{example}</div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -630,6 +658,329 @@ function getRealAreaForMeasurement(
   );
 }
 
+function normalizeDimensionSourceText(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[‐‑‒–—―ーｰ－]/g, '-');
+}
+
+function inferMetersFromDimensionValue(rawValue: string, sourceText: string): number | null {
+  const numeric = Number(String(rawValue).replace(/,/g, ''));
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+
+  const normalized = normalizeDimensionSourceText(sourceText);
+  if (/CM/.test(normalized)) {
+    return Number((numeric / 100).toFixed(4));
+  }
+  if (/MM/.test(normalized) || numeric > 10) {
+    return Number((numeric / 1000).toFixed(4));
+  }
+  return Number(numeric.toFixed(4));
+}
+
+function buildDimensionBoxCandidate({
+  fieldName,
+  label,
+  valueType,
+  valueNumber,
+  valueText,
+  confidence,
+  sourceText,
+  sourcePage,
+  sourceBox,
+  reason,
+  requiresReview = true,
+}: {
+  fieldName: keyof EstimateBlock;
+  label: string;
+  valueType: 'number' | 'string';
+  valueNumber?: number;
+  valueText?: string;
+  confidence: number;
+  sourceText: string;
+  sourcePage: number;
+  sourceBox: BoundingBox;
+  reason: string;
+  requiresReview?: boolean;
+}): AICandidate {
+  return {
+    id: crypto.randomUUID(),
+    fieldName,
+    label,
+    valueType,
+    valueNumber,
+    valueText,
+    confidence,
+    sourceText,
+    sourcePage,
+    sourceBox,
+    reason,
+    requiresReview,
+    candidateOrigin: 'cad_structured',
+  };
+}
+
+function pickProductLengthCandidate(sourceText: string, values: string[]): string | null {
+  const normalizedValues = values
+    .map((value) => inferMetersFromDimensionValue(value, sourceText))
+    .filter((value): value is number => value !== null);
+  for (const value of normalizedValues) {
+    const matched = productLengths.find((item) => Math.abs(item.value - value) < 0.0001);
+    if (matched) return matched.name;
+  }
+  return null;
+}
+
+function buildDimensionDerivedCandidates(
+  drawing: Drawing,
+  block: EstimateBlock,
+): AICandidate[] {
+  const dimensions = drawing.cadStructured?.dimensions ?? [];
+  const recommendations: AICandidate[] = [];
+
+  dimensions.forEach((dimension) => {
+    const sourceText = dimension.sourceText ?? '';
+    const normalized = normalizeDimensionSourceText(sourceText);
+    const valuesInMeters = dimension.values
+      .map((value) => inferMetersFromDimensionValue(value, sourceText))
+      .filter((value): value is number => value !== null);
+    const firstValue = valuesInMeters[0] ?? null;
+    const secondValue = valuesInMeters[1] ?? null;
+    const thirdValue = valuesInMeters[2] ?? null;
+    const baseConfidence = Math.max(0.72, Math.min(0.9, dimension.confidence - 0.04));
+    const sourcePage = dimension.pageNo;
+    const sourceBox = dimension.bbox;
+
+    if (block.blockType === 'secondary_product') {
+      if (firstValue !== null && (/W\d|W=|幅/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productWidth',
+          label: CANDIDATE_LABELS.productWidth,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の W / 幅表記から製品幅候補を生成',
+        }));
+      }
+      if ((secondValue ?? firstValue) !== null && (/H\d|H=|高/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productHeight',
+          label: CANDIDATE_LABELS.productHeight,
+          valueType: 'number',
+          valueNumber: secondValue ?? firstValue ?? undefined,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の H / 高さ表記から製品高さ候補を生成',
+        }));
+      }
+      const productLength = pickProductLengthCandidate(sourceText, dimension.values);
+      if (productLength && (thirdValue !== null || /L\d|長/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productLength',
+          label: CANDIDATE_LABELS.productLength,
+          valueType: 'string',
+          valueNumber: undefined,
+          valueText: productLength,
+          confidence: baseConfidence - 0.03,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の長さ候補を製品長さ選択肢へ正規化',
+        }));
+      }
+    }
+
+    if (block.blockType === 'retaining_wall') {
+      if (firstValue !== null && (/W\d|W=|底版幅|底盤幅|幅/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productWidth',
+          label: CANDIDATE_LABELS.productWidth,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の W / 底版幅表記から底版幅候補を生成',
+        }));
+      }
+      if ((secondValue ?? firstValue) !== null && (/H\d|H=|壁高|擁壁高|高/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productHeight',
+          label: CANDIDATE_LABELS.productHeight,
+          valueType: 'number',
+          valueNumber: secondValue ?? firstValue ?? undefined,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の H / 擁壁高表記から擁壁高候補を生成',
+        }));
+      }
+      if (firstValue !== null && /T\d|T=|厚/.test(normalized)) {
+        if (/砕石|RC40|栗石/.test(normalized)) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'crushedStoneThickness',
+            label: CANDIDATE_LABELS.crushedStoneThickness,
+            valueType: 'number',
+            valueNumber: firstValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.02,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の砕石厚表記から基礎砕石厚候補を生成',
+          }));
+        }
+        if (/均し|ベース|基礎|CON|コンクリ/.test(normalized)) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'baseThickness',
+            label: CANDIDATE_LABELS.baseThickness,
+            valueType: 'number',
+            valueNumber: firstValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.02,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の基礎厚表記から基礎コンクリート厚候補を生成',
+          }));
+        }
+      }
+    }
+
+    if (block.blockType === 'pavement') {
+      if (firstValue !== null && (/W\d|W=|幅員|舗装幅|幅/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'pavementWidth',
+          label: CANDIDATE_LABELS.pavementWidth,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の幅員表記から舗装幅候補を生成',
+        }));
+      }
+
+      const thicknessValues = valuesInMeters;
+      if (/AS|表層/.test(normalized) && thicknessValues[0] !== undefined) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'surfaceThickness',
+          label: CANDIDATE_LABELS.surfaceThickness,
+          valueType: 'number',
+          valueNumber: thicknessValues[0],
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の As / 表層厚から表層厚候補を生成',
+        }));
+      }
+      if ((/AS/.test(normalized) && thicknessValues.length >= 2) || /基層/.test(normalized)) {
+        const binderValue = /基層/.test(normalized) ? thicknessValues[0] : thicknessValues[1];
+        if (binderValue !== undefined) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'binderThickness',
+            label: CANDIDATE_LABELS.binderThickness,
+            valueType: 'number',
+            valueNumber: binderValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.03,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の基層厚表記から基層厚候補を生成',
+          }));
+        }
+      }
+      if ((/路盤|粒調|RC40/.test(normalized) && thicknessValues.length >= 1) || /上層/.test(normalized)) {
+        const baseValue = /上層/.test(normalized) && thicknessValues[0] !== undefined
+          ? thicknessValues[0]
+          : thicknessValues[thicknessValues.length - 1];
+        if (baseValue !== undefined) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'baseThickness',
+            label: CANDIDATE_LABELS.baseThickness,
+            valueType: 'number',
+            valueNumber: baseValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.03,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の路盤厚表記から上層路盤厚候補を生成',
+          }));
+        }
+      }
+      if ((/下層|セメント安定|改良/.test(normalized) && thicknessValues.length >= 1)) {
+        const subBaseValue = thicknessValues[thicknessValues.length - 1];
+        if (subBaseValue !== undefined) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'crushedStoneThickness',
+            label: CANDIDATE_LABELS.crushedStoneThickness,
+            valueType: 'number',
+            valueNumber: subBaseValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.04,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の下層路盤 / 改良厚表記から下層厚候補を生成',
+          }));
+        }
+      }
+    }
+
+    if (block.blockType === 'demolition') {
+      if (firstValue !== null && (/W\d|W=|幅/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'demolitionWidth',
+          label: CANDIDATE_LABELS.demolitionWidth,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の幅表記から撤去幅候補を生成',
+        }));
+      }
+      if (firstValue !== null && (/T\d|T=|厚/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'demolitionThickness',
+          label: CANDIDATE_LABELS.demolitionThickness,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence - 0.02,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の厚み表記から撤去厚候補を生成',
+        }));
+      }
+    }
+  });
+
+  return dedupeCandidates(recommendations);
+}
+
 function buildMeasurementDerivedCandidates(
   drawing: Drawing,
   block: EstimateBlock,
@@ -795,7 +1146,7 @@ function buildMeasurementDerivedCandidates(
     }
   }
 
-  return dedupeCandidates(recommendations);
+  return dedupeCandidates([...recommendations, ...buildDimensionDerivedCandidates(drawing, block)]);
 }
 
 function rebuildDrawingCandidates(
@@ -1821,6 +2172,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
 
             <CalculationResults result={result} block={activeBlock} />
             <EstimationLogicCard run={logicRun} loading={isLogicRunning} error={logicRunError} />
+            <WorkbookLogicCard blockType={activeBlock.blockType} />
             {reportError && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
                 {reportError}
