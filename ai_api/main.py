@@ -1377,6 +1377,152 @@ def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]], learning_con
     }
 
 
+COUNT_STRUCTURE_LABEL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("街渠桝", (r"街渠桝", r"街渠ます")),
+    ("接続桝", (r"接続桝", r"接続ます")),
+    ("L形側溝桝", (r"[lLＬ]形側溝桝", r"[lLＬ]型側溝桝", r"側溝桝")),
+    ("集水桝", (r"集水桝", r"集水ます")),
+)
+
+MATERIAL_TAKEOFF_LABEL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("RC-40", (r"RC[-ー−‐ ]?40",)),
+    ("RM-40", (r"RM[-ー−‐ ]?40",)),
+    ("地盤改良", (r"地盤改良", r"改良土", r"置換(?:え)?", r"セメント改良")),
+)
+
+COUNT_STRUCTURE_QUANTITY_PATTERN = re.compile(r"(\d{1,5}(?:,\d{3})*(?:\.\d+)?)\s*(箇所|箇|基|個|本)")
+MATERIAL_TAKEOFF_QUANTITY_PATTERN = re.compile(r"(\d{1,7}(?:,\d{3})*(?:\.\d+)?)\s*(m3|m³|㎥|t|ton|トン)", flags=re.IGNORECASE)
+
+
+def _normalize_count_unit(raw_unit: str) -> str:
+    normalized = normalize_text(raw_unit).strip()
+    if normalized in {"箇", "箇所"}:
+        return "箇所"
+    if normalized == "個":
+        return "個"
+    if normalized == "本":
+        return "本"
+    return "基" if normalized == "基" else normalized
+
+
+def _normalize_material_unit(raw_unit: str) -> str:
+    normalized = normalize_text(raw_unit).strip().lower()
+    if normalized in {"m3", "m³", "㎥"}:
+        return "m3"
+    if normalized in {"t", "ton", "トン"}:
+        return "t"
+    return normalized
+
+
+def _extract_named_count_structure_quantities(ocr_structured: dict[str, Any]) -> list[dict[str, Any]]:
+    quantities: list[dict[str, Any]] = []
+    for item in ocr_structured.get("parsedTextBlocks", []):
+        source_text = str(item.get("text", ""))
+        normalized = normalize_text(source_text)
+        if any(token in normalized for token in ("単価", "金額", "円", "数量表", "内訳")):
+            continue
+
+        name: str | None = None
+        for canonical, patterns in COUNT_STRUCTURE_LABEL_PATTERNS:
+            if any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in patterns):
+                name = canonical
+                break
+        if not name:
+            continue
+
+        quantity_match = COUNT_STRUCTURE_QUANTITY_PATTERN.search(normalized)
+        if not quantity_match:
+            continue
+
+        quantity_value = float(quantity_match.group(1).replace(",", ""))
+        if quantity_value <= 0:
+            continue
+
+        count_unit = _normalize_count_unit(quantity_match.group(2))
+        quantities.append({
+            "fieldName": "countQuantity",
+            "label": f"{name} 数量",
+            "value": quantity_value,
+            "confidence": round(min(0.94, max(0.72, float(item.get("confidence", 0.0)) - 0.02)), 4),
+            "sourceText": source_text,
+            "sourcePage": item.get("pageNo", 1),
+            "sourceBox": item.get("bbox", []),
+            "requiresReview": float(item.get("confidence", 0.0)) < 0.82 or name == "L形側溝桝",
+            "targetBlockType": "count_structure",
+            "quantityUnit": count_unit,
+            "itemName": name,
+            "specification": "OCR explicit count row",
+            "autoCreateBlock": True,
+        })
+
+    deduped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for quantity in quantities:
+        key = (
+            str(quantity.get("itemName", "")),
+            str(quantity.get("quantityUnit", "")),
+            str(quantity.get("value", "")),
+        )
+        existing = deduped.get(key)
+        if existing is None or float(quantity.get("confidence", 0.0)) > float(existing.get("confidence", 0.0)):
+            deduped[key] = quantity
+    return list(deduped.values())
+
+
+def _extract_named_material_takeoff_quantities(ocr_structured: dict[str, Any]) -> list[dict[str, Any]]:
+    quantities: list[dict[str, Any]] = []
+    for item in ocr_structured.get("parsedTextBlocks", []):
+        source_text = str(item.get("text", ""))
+        normalized = normalize_text(source_text)
+        if any(token in normalized for token in ("単価", "金額", "円", "数量表", "内訳")):
+            continue
+
+        material_name: str | None = None
+        for canonical, patterns in MATERIAL_TAKEOFF_LABEL_PATTERNS:
+            if any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in patterns):
+                material_name = canonical
+                break
+        if not material_name:
+            continue
+
+        quantity_match = MATERIAL_TAKEOFF_QUANTITY_PATTERN.search(normalized)
+        if not quantity_match:
+            continue
+
+        quantity_value = float(quantity_match.group(1).replace(",", ""))
+        if quantity_value <= 0:
+            continue
+
+        material_unit = _normalize_material_unit(quantity_match.group(2))
+        quantities.append({
+            "fieldName": "materialDirectQuantity",
+            "label": f"{material_name} 数量",
+            "value": quantity_value,
+            "confidence": round(min(0.94, max(0.74, float(item.get("confidence", 0.0)) - 0.02)), 4),
+            "sourceText": source_text,
+            "sourcePage": item.get("pageNo", 1),
+            "sourceBox": item.get("bbox", []),
+            "requiresReview": float(item.get("confidence", 0.0)) < 0.84,
+            "targetBlockType": "material_takeoff",
+            "quantityUnit": material_unit,
+            "itemName": material_name,
+            "specification": "cadStructured direct quantity row",
+            "materialTakeoffMode": "t" if material_unit == "t" else "m3",
+            "autoCreateBlock": True,
+        })
+
+    deduped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for quantity in quantities:
+        key = (
+            str(quantity.get("itemName", "")),
+            str(quantity.get("materialTakeoffMode", "")),
+            str(quantity.get("value", "")),
+        )
+        existing = deduped.get(key)
+        if existing is None or float(quantity.get("confidence", 0.0)) > float(existing.get("confidence", 0.0)):
+            deduped[key] = quantity
+    return list(deduped.values())
+
+
 def build_cad_structured_output(
     *,
     file_name: str,
@@ -1551,6 +1697,16 @@ def build_cad_structured_output(
             "sourceBox": candidate.get("sourceBox", []),
             "requiresReview": candidate.get("requiresReview", False),
         })
+    if not (business_document and business_document.get("isBusinessDocument")):
+        quantities.extend(_extract_named_count_structure_quantities(ocr_structured))
+        quantities.extend(_extract_named_material_takeoff_quantities(ocr_structured))
+    quantities.sort(
+        key=lambda item: (
+            0 if item.get("autoCreateBlock") else 1,
+            0 if not item.get("requiresReview") else 1,
+            -float(item.get("confidence", 0.0)),
+        )
+    )
 
     construction_conditions = [
         {

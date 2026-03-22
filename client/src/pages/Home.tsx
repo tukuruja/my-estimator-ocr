@@ -81,6 +81,11 @@ const CANDIDATE_LABELS: Record<string, string> = {
   binderThickness: '基層厚',
   demolitionWidth: '撤去幅',
   demolitionThickness: '撤去厚',
+  countQuantity: '数量',
+  countUnit: '数量単位',
+  materialDirectQuantity: '直接数量',
+  materialArea: '基準面積',
+  materialThickness: '層厚 / 改良厚',
 };
 
 const EMPTY_REPORT_BUNDLE: GeneratedReportBundle = {
@@ -1210,6 +1215,86 @@ function createBlockForType(projectId: string, blockType: BlockType, baseName: s
   return block;
 }
 
+function normalizeAutoBlockName(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+}
+
+function parseNumericQuantity(value: string | number | undefined): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseFloat(value.replace(/,/g, ''));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function buildAutoBlockKey(blockType: BlockType, itemName: string, unitOrMode: string): string {
+  return `${blockType}::${normalizeAutoBlockName(itemName)}::${unitOrMode.trim().toLowerCase()}`;
+}
+
+function buildAutoBlocksFromCadStructured(
+  projectId: string,
+  currentBlocks: EstimateBlock[],
+  drawing: Drawing,
+): EstimateBlock[] {
+  const structuredQuantities = drawing.cadStructured?.quantities ?? [];
+  const existingKeys = new Set(
+    currentBlocks.map((block) => {
+      if (block.blockType === 'count_structure') {
+        return buildAutoBlockKey(block.blockType, block.secondaryProduct || block.name, block.countUnit || '箇所');
+      }
+      if (block.blockType === 'material_takeoff') {
+        return buildAutoBlockKey(block.blockType, block.secondaryProduct || block.name, block.materialTakeoffMode || 'm3');
+      }
+      return '';
+    }).filter(Boolean),
+  );
+  const nextBlocks: EstimateBlock[] = [];
+
+  structuredQuantities.forEach((quantity) => {
+    if (!quantity.autoCreateBlock || !quantity.targetBlockType) return;
+
+    const numericValue = parseNumericQuantity(quantity.value);
+    const itemName = (quantity.itemName || quantity.label || '').trim();
+    if (!numericValue || !itemName) return;
+
+    if (quantity.targetBlockType === 'count_structure') {
+      const countUnit = quantity.quantityUnit || '箇所';
+      const key = buildAutoBlockKey('count_structure', itemName, countUnit);
+      if (existingKeys.has(key)) return;
+
+      const block = createBlockForType(projectId, 'count_structure', itemName, drawing.id);
+      block.name = itemName;
+      block.secondaryProduct = itemName;
+      block.countQuantity = numericValue;
+      block.countUnit = countUnit;
+      block.requiresReviewFields = quantity.requiresReview ? ['countQuantity'] : [];
+      nextBlocks.push(block);
+      existingKeys.add(key);
+      return;
+    }
+
+    if (quantity.targetBlockType === 'material_takeoff') {
+      const materialTakeoffMode = quantity.materialTakeoffMode || (quantity.quantityUnit === 't' ? 't' : 'm3');
+      const key = buildAutoBlockKey('material_takeoff', itemName, materialTakeoffMode);
+      if (existingKeys.has(key)) return;
+
+      const block = createBlockForType(projectId, 'material_takeoff', itemName, drawing.id);
+      block.name = itemName;
+      block.secondaryProduct = itemName;
+      block.materialTakeoffMode = materialTakeoffMode;
+      block.materialDirectQuantity = numericValue;
+      block.requiresReviewFields = quantity.requiresReview ? ['materialDirectQuantity'] : [];
+      nextBlocks.push(block);
+      existingKeys.add(key);
+    }
+  });
+
+  return nextBlocks;
+}
+
 interface HomeProps {
   preferredBlockType?: BlockType;
 }
@@ -1688,13 +1773,17 @@ export default function Home({ preferredBlockType }: HomeProps) {
         new Date().toISOString().slice(0, 10),
       );
       const nextDrawing = rebuildDrawingCandidates(parsedDrawing, activeBlock, masters, effectiveDate);
+      const autoBlocks = buildAutoBlocksFromCadStructured(activeProject.id, activeProject.blocks, nextDrawing);
 
       replaceActiveProject((project) => ({
         ...project,
         drawings: [...project.drawings, nextDrawing],
-        blocks: project.blocks.map((block, index) => (
-          index === 0 && !block.drawingId ? { ...block, drawingId: nextDrawing.id } : block
-        )),
+        blocks: [
+          ...project.blocks.map((block, index) => (
+            index === 0 && !block.drawingId ? { ...block, drawingId: nextDrawing.id } : block
+          )),
+          ...autoBlocks,
+        ],
       }));
 
       setAppState((prev) => (prev ? {
@@ -1706,7 +1795,11 @@ export default function Home({ preferredBlockType }: HomeProps) {
       setHoveredCandidateId(null);
       setActiveOcrItemId(nextDrawing.ocrItems[0]?.id ?? null);
       setUploadStatusMessage(null);
-      toast.success(`図面を解析しました。OCR ${nextDrawing.ocrItems.length} 行、候補 ${nextDrawing.aiCandidates.length} 件です。`);
+      toast.success(
+        autoBlocks.length > 0
+          ? `図面を解析しました。OCR ${nextDrawing.ocrItems.length} 行、候補 ${nextDrawing.aiCandidates.length} 件、自動追加 block ${autoBlocks.length} 件です。`
+          : `図面を解析しました。OCR ${nextDrawing.ocrItems.length} 行、候補 ${nextDrawing.aiCandidates.length} 件です。`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : '図面解析に失敗しました。';
       setUploadError(message);
@@ -1715,7 +1808,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
     } finally {
       setIsUploading(false);
     }
-  }, [activeBlock, activeProject, handleOcrJobProgress, masters, ocrLearningContext, replaceActiveProject]);
+  }, [activeBlock, activeProject, effectiveDate, handleOcrJobProgress, masters, ocrLearningContext, replaceActiveProject]);
 
   const handleApplyCandidate = useCallback((candidateId: string) => {
     if (!activeProject || !activeBlock || !activeDrawing) return;

@@ -338,6 +338,12 @@ export interface DrawingCadStructuredQuantity {
   sourcePage: number;
   sourceBox: BoundingBox;
   requiresReview: boolean;
+  targetBlockType?: BlockType;
+  quantityUnit?: string;
+  itemName?: string;
+  specification?: string;
+  materialTakeoffMode?: MaterialTakeoffMode;
+  autoCreateBlock?: boolean;
 }
 
 export interface DrawingCadStructuredCondition {
