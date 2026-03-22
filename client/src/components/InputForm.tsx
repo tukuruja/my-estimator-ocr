@@ -14,7 +14,7 @@ import {
 interface InputFormProps {
   block: EstimateBlock;
   onChange: (field: keyof EstimateBlock, value: string | number) => void;
-  onZoneChange: (zoneId: string, field: keyof EstimateZone, value: string | number) => void;
+  onZoneChange: (zoneId: string, field: keyof EstimateZone, value: EstimateZone[keyof EstimateZone]) => void;
   onAddZone: () => void;
   onRemoveZone: (zoneId: string) => void;
 }
@@ -88,6 +88,28 @@ function TextInput({ value, onChange, placeholder = '' }: { value: string; onCha
   );
 }
 
+function TextAreaInput({
+  value,
+  onChange,
+  placeholder = '',
+  rows = 3,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder?: string;
+  rows?: number;
+}) {
+  return (
+    <textarea
+      className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm transition-all focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+      value={value}
+      placeholder={placeholder}
+      rows={rows}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
 function SelectInput({
   value,
   options,
@@ -111,6 +133,30 @@ function SelectInput({
       ))}
     </select>
   );
+}
+
+function parseStringList(value: string): string[] {
+  return value
+    .split(/[\n,、]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parsePageRefs(value: string): number[] {
+  return value
+    .split(/[\n,、\s]+/)
+    .flatMap((item) => item.split('-'))
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item) && item > 0)
+    .map((item) => Math.round(item));
+}
+
+function joinList(value: string[]): string {
+  return value.join('\n');
+}
+
+function joinPageRefs(value: number[]): string {
+  return value.join(', ');
 }
 
 function WorkTypeSelect({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
@@ -333,7 +379,7 @@ function ZoneBreakdownFields({ block, onZoneChange, onAddZone, onRemoveZone }: P
       <SectionHeader title="区画別見積" color="bg-cyan-600" emoji="🗂" />
       <div className="space-y-3 bg-cyan-50 p-3">
         <div className="rounded-md border border-cyan-200 bg-white px-3 py-2 text-[11px] leading-5 text-slate-600">
-          集合住宅外構では、`A棟前 / 共用通路 / 駐車場` のように区画ごとへ主数量を分けて持つと、他業者都合の追加・変更見積がしやすくなります。区画数量は明細に `区画別配賦` として出ます。
+          集合住宅外構では、`A棟前 / 共用通路 / 駐車場` のように区画ごとへ主数量を分けて持つと、他業者都合の追加・変更見積がしやすくなります。ここで入れた図面ページ・写真・他工種名は `変更見積書` の根拠行に出ます。
         </div>
 
         {block.zones.length === 0 && (
@@ -373,8 +419,30 @@ function ZoneBreakdownFields({ block, onZoneChange, onAddZone, onRemoveZone }: P
               <FormField label="他工種調整率" unit="%" hint="設備・植栽・建築引渡し待ちの補正です。">
                 <NumberInput value={zone.coordinationAdjustmentRate} onChange={(value) => onZoneChange(zone.id, 'coordinationAdjustmentRate', Math.max(0, value))} />
               </FormField>
+              <FormField label="図面ページ" hint="変更見積の根拠となる図面ページをカンマ区切りで入れます。例: 1, 2, 5">
+                <TextInput
+                  value={joinPageRefs(zone.drawingPageRefs)}
+                  onChange={(value) => onZoneChange(zone.id, 'drawingPageRefs', parsePageRefs(value))}
+                  placeholder="例: 1, 2, 5"
+                />
+              </FormField>
+              <FormField label="他工種名" hint="この区画で干渉する工種名をカンマまたは改行で入れます。">
+                <TextInput
+                  value={zone.relatedTradeNames.join(', ')}
+                  onChange={(value) => onZoneChange(zone.id, 'relatedTradeNames', parseStringList(value))}
+                  placeholder="例: 設備配管, 植栽, 建築外構"
+                />
+              </FormField>
+              <FormField label="備考写真URL" hint="写真クラウドや共有リンクを改行ごとに貼ります。" className="col-span-2">
+                <TextAreaInput
+                  value={joinList(zone.notePhotoUrls)}
+                  onChange={(value) => onZoneChange(zone.id, 'notePhotoUrls', parseStringList(value))}
+                  placeholder={'例:\nhttps://example.com/photo-1\nhttps://example.com/photo-2'}
+                  rows={3}
+                />
+              </FormField>
               <FormField label="備考" hint="追加変更の理由や他者都合を書き残します。" className="col-span-2">
-                <TextInput value={zone.note} onChange={(value) => onZoneChange(zone.id, 'note', value)} placeholder="例: 設備配管先行後に再着手" />
+                <TextAreaInput value={zone.note} onChange={(value) => onZoneChange(zone.id, 'note', value)} placeholder="例: 設備配管先行後に再着手" rows={2} />
               </FormField>
             </div>
           </div>

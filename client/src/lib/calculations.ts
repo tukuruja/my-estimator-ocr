@@ -524,6 +524,9 @@ function applyZoneBreakdowns(
       coordinationAdjustmentRate: round2(rates.coordinationAdjustmentRate * 100),
       coordinationAdjustmentAmount,
       totalAmount,
+      drawingPageRefs: zone.drawingPageRefs,
+      notePhotoUrls: zone.notePhotoUrls,
+      relatedTradeNames: zone.relatedTradeNames,
       note: zone.note,
     };
   });

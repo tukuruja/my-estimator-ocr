@@ -69,11 +69,14 @@ const CANDIDATE_LABELS: Record<string, string> = {
 
 const EMPTY_REPORT_BUNDLE: GeneratedReportBundle = {
   estimateRows: [],
+  changeEstimateRows: [],
   unitPriceEvidenceRows: [],
   reviewIssues: [],
   summary: {
     totalAmount: 0,
     totalRows: 0,
+    changeEstimateRowCount: 0,
+    changeEstimateTotalAmount: 0,
     requiresReviewCount: 0,
   },
 };
@@ -841,7 +844,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
     }));
   }, [activeProject, activeBlock, replaceActiveProject]);
 
-  const handleZoneChange = useCallback((zoneId: string, field: keyof EstimateZone, value: string | number) => {
+  const handleZoneChange = useCallback((zoneId: string, field: keyof EstimateZone, value: EstimateZone[keyof EstimateZone]) => {
     if (!activeProject || !activeBlock) return;
     replaceActiveProject((project) => ({
       ...project,

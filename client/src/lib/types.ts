@@ -253,6 +253,30 @@ export interface EstimateReportRow {
   sourceSummary: string;
 }
 
+export interface ChangeEstimateRow {
+  id: string;
+  zoneName: string;
+  itemName: string;
+  specification: string;
+  quantity: number;
+  unit: string;
+  quantityShare: number;
+  baseAmount: number;
+  remobilizationCount: number;
+  remobilizationAmount: number;
+  temporaryRestorationRate: number;
+  temporaryRestorationQuantity: number;
+  temporaryRestorationAmount: number;
+  coordinationAdjustmentRate: number;
+  coordinationAdjustmentAmount: number;
+  totalAmount: number;
+  drawingPageRefs: number[];
+  notePhotoUrls: string[];
+  relatedTradeNames: string[];
+  remarks: string;
+  sourceSummary: string;
+}
+
 export interface UnitPriceEvidenceRow {
   id: string;
   estimateRowId: string;
@@ -281,11 +305,14 @@ export interface ReviewIssue {
 
 export interface GeneratedReportBundle {
   estimateRows: EstimateReportRow[];
+  changeEstimateRows: ChangeEstimateRow[];
   unitPriceEvidenceRows: UnitPriceEvidenceRow[];
   reviewIssues: ReviewIssue[];
   summary: {
     totalAmount: number;
     totalRows: number;
+    changeEstimateRowCount: number;
+    changeEstimateTotalAmount: number;
     requiresReviewCount: number;
   };
 }
@@ -334,6 +361,9 @@ export interface EstimateZone {
   id: string;
   name: string;
   primaryQuantity: number;
+  drawingPageRefs: number[];
+  notePhotoUrls: string[];
+  relatedTradeNames: string[];
   remobilizationCount: number;
   temporaryRestorationRate: number;
   coordinationAdjustmentRate: number;
@@ -438,6 +468,9 @@ export interface CalculationZoneBreakdown {
   coordinationAdjustmentRate: number;
   coordinationAdjustmentAmount: number;
   totalAmount: number;
+  drawingPageRefs: number[];
+  notePhotoUrls: string[];
+  relatedTradeNames: string[];
   note: string;
 }
 
@@ -598,6 +631,9 @@ export function createDefaultEstimateZone(name: string = 'A棟前'): EstimateZon
     id: crypto.randomUUID(),
     name,
     primaryQuantity: 0,
+    drawingPageRefs: [],
+    notePhotoUrls: [],
+    relatedTradeNames: [],
     remobilizationCount: 0,
     temporaryRestorationRate: 0,
     coordinationAdjustmentRate: 0,

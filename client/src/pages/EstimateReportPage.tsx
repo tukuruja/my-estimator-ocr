@@ -9,11 +9,14 @@ import type { AppState, BlockType, GeneratedReportBundle } from '@/lib/types';
 
 const EMPTY_REPORT_BUNDLE: GeneratedReportBundle = {
   estimateRows: [],
+  changeEstimateRows: [],
   unitPriceEvidenceRows: [],
   reviewIssues: [],
   summary: {
     totalAmount: 0,
     totalRows: 0,
+    changeEstimateRowCount: 0,
+    changeEstimateTotalAmount: 0,
     requiresReviewCount: 0,
   },
 };

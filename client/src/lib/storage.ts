@@ -31,6 +31,28 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeNumberList(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === 'number') return item;
+      if (typeof item === 'string' && item.trim()) {
+        const next = Number(item);
+        return Number.isFinite(next) ? next : null;
+      }
+      return null;
+    })
+    .filter((item): item is number => item !== null)
+    .map((item) => Math.max(1, Math.round(item)));
+}
+
 function normalizeZone(raw: unknown, index: number): EstimateZone {
   const fallback = createDefaultEstimateZone(`区画 ${index + 1}`);
   if (!isObject(raw)) {
@@ -43,6 +65,9 @@ function normalizeZone(raw: unknown, index: number): EstimateZone {
     id: typeof raw.id === 'string' ? raw.id : fallback.id,
     name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : fallback.name,
     primaryQuantity: typeof raw.primaryQuantity === 'number' ? raw.primaryQuantity : fallback.primaryQuantity,
+    drawingPageRefs: normalizeNumberList(raw.drawingPageRefs),
+    notePhotoUrls: normalizeStringList(raw.notePhotoUrls),
+    relatedTradeNames: normalizeStringList(raw.relatedTradeNames),
     remobilizationCount: typeof raw.remobilizationCount === 'number' ? raw.remobilizationCount : fallback.remobilizationCount,
     temporaryRestorationRate: typeof raw.temporaryRestorationRate === 'number' ? raw.temporaryRestorationRate : fallback.temporaryRestorationRate,
     coordinationAdjustmentRate: typeof raw.coordinationAdjustmentRate === 'number' ? raw.coordinationAdjustmentRate : fallback.coordinationAdjustmentRate,
@@ -89,6 +114,7 @@ function migrateLegacyData(raw: Record<string, unknown>): AppState {
         blockType: 'secondary_product',
         requiresReviewFields: Array.isArray(block.requiresReviewFields) ? block.requiresReviewFields : [],
         appliedCandidateIds: Array.isArray(block.appliedCandidateIds) ? block.appliedCandidateIds : [],
+        zones: Array.isArray(block.zones) ? block.zones.map((zone, zoneIndex) => normalizeZone(zone, zoneIndex)) : [],
       }))
     : [createDefaultBlock(project.id, '新規見積')];
 

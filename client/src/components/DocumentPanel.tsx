@@ -10,7 +10,7 @@ interface DocumentPanelProps {
   estimateName: string;
 }
 
-type TabKey = 'estimate' | 'evidence' | 'review';
+type TabKey = 'estimate' | 'change' | 'evidence' | 'review';
 
 function exportCsv(fileName: string, headers: string[], rows: Array<Array<string | number | null>>) {
   const csvRows = [headers, ...rows].map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','));
@@ -54,6 +54,7 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
           </div>
           <div className="text-right text-xs text-slate-500">
             <div>見積行 {bundle.summary.totalRows} 件</div>
+            <div>変更行 {bundle.summary.changeEstimateRowCount} 件</div>
             <div>要確認 {bundle.summary.requiresReviewCount} 件</div>
           </div>
         </div>
@@ -74,6 +75,13 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
           className={`rounded-md px-3 py-1.5 text-xs font-semibold ${tab === 'estimate' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
         >
           見積書
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('change')}
+          className={`rounded-md px-3 py-1.5 text-xs font-semibold ${tab === 'change' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+        >
+          変更見積書
         </button>
         <button
           type="button"
@@ -139,6 +147,96 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {tab === 'change' && (
+          <div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="text-xs leading-5 text-slate-600">
+                区画ごとの変更数量、再段取り、仮復旧、他工種調整、図面根拠、備考写真をまとめた専用帳票です。
+              </div>
+              <button
+                type="button"
+                onClick={() => exportCsv(
+                  `${filePrefix}_変更見積書.csv`,
+                  ['区画', '工事項目', '仕様', '数量', '単位', '配賦率', '基本額', '再段取り回数', '再段取り額', '仮復旧率', '仮復旧数量', '仮復旧額', '他工種調整率', '他工種調整額', '区画金額', '図面ページ', '他工種名', '備考写真', '備考', '根拠'],
+                  bundle.changeEstimateRows.map((row) => [
+                    row.zoneName,
+                    row.itemName,
+                    row.specification,
+                    row.quantity,
+                    row.unit,
+                    row.quantityShare,
+                    row.baseAmount,
+                    row.remobilizationCount,
+                    row.remobilizationAmount,
+                    row.temporaryRestorationRate,
+                    row.temporaryRestorationQuantity,
+                    row.temporaryRestorationAmount,
+                    row.coordinationAdjustmentRate,
+                    row.coordinationAdjustmentAmount,
+                    row.totalAmount,
+                    row.drawingPageRefs.map((pageNo) => `p.${pageNo}`).join(', '),
+                    row.relatedTradeNames.join(', '),
+                    row.notePhotoUrls.join('\n'),
+                    row.remarks,
+                    row.sourceSummary,
+                  ]),
+                )}
+                className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+              >
+                <Download className="h-4 w-4" /> CSV出力
+              </button>
+            </div>
+            {bundle.changeEstimateRows.length === 0 ? (
+              <div className="rounded-md border border-dashed border-cyan-300 bg-cyan-50 px-4 py-6 text-sm text-slate-600">
+                変更見積に使う区画行はまだありません。区画別見積に数量と根拠ページを入れると、ここに専用帳票が出ます。
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-cyan-50 text-slate-600">
+                  <tr className="border-b border-cyan-100">
+                    <th className="px-2 py-2 text-left">区画</th>
+                    <th className="px-2 py-2 text-left">工事項目</th>
+                    <th className="px-2 py-2 text-right">数量</th>
+                    <th className="px-2 py-2 text-right">基本額</th>
+                    <th className="px-2 py-2 text-right">追加額</th>
+                    <th className="px-2 py-2 text-right">区画金額</th>
+                    <th className="px-2 py-2 text-left">根拠情報</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bundle.changeEstimateRows.map((row) => (
+                    <tr key={row.id} className="border-b border-slate-100 align-top">
+                      <td className="px-2 py-2">
+                        <div className="font-semibold text-slate-900">{row.zoneName}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">配賦率 {row.quantityShare.toLocaleString('ja-JP', { maximumFractionDigits: 2 })}%</div>
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="font-semibold text-slate-900">{row.itemName}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{row.specification}</div>
+                      </td>
+                      <td className="px-2 py-2 text-right">{row.quantity.toLocaleString('ja-JP', { maximumFractionDigits: 2 })}{row.unit}</td>
+                      <td className="px-2 py-2 text-right">¥{row.baseAmount.toLocaleString('ja-JP')}</td>
+                      <td className="px-2 py-2 text-right">
+                        <div>¥{(row.remobilizationAmount + row.temporaryRestorationAmount + row.coordinationAdjustmentAmount).toLocaleString('ja-JP')}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          再段取り {row.remobilizationCount}回 / 仮復旧 {row.temporaryRestorationRate}% / 他工種調整 {row.coordinationAdjustmentRate}%
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-right font-semibold">¥{row.totalAmount.toLocaleString('ja-JP')}</td>
+                      <td className="px-2 py-2">
+                        <div>図面: {row.drawingPageRefs.length > 0 ? row.drawingPageRefs.map((pageNo) => `p.${pageNo}`).join(', ') : '未設定'}</div>
+                        <div className="mt-1">他工種: {row.relatedTradeNames.length > 0 ? row.relatedTradeNames.join(', ') : '未設定'}</div>
+                        <div className="mt-1">備考写真: {row.notePhotoUrls.length > 0 ? `${row.notePhotoUrls.length}枚` : '未登録'}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{row.remarks}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 

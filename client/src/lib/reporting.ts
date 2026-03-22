@@ -1,5 +1,6 @@
 import type {
   CalculationResult,
+  ChangeEstimateRow,
   Drawing,
   EstimateBlock,
   EstimateReportRow,
@@ -23,6 +24,13 @@ function createEstimateRow(input: Omit<EstimateReportRow, 'id'>): EstimateReport
   };
 }
 
+function createChangeEstimateRow(input: Omit<ChangeEstimateRow, 'id'>): ChangeEstimateRow {
+  return {
+    id: crypto.randomUUID(),
+    ...input,
+  };
+}
+
 function createEvidenceRow(input: Omit<UnitPriceEvidenceRow, 'id'>): UnitPriceEvidenceRow {
   return {
     id: crypto.randomUUID(),
@@ -40,6 +48,20 @@ function createReviewIssue(input: Omit<ReviewIssue, 'id'>): ReviewIssue {
 function resolveSourceSummary(drawing: Drawing | null): string {
   if (!drawing) return '図面未連携';
   return `${drawing.fileName || drawing.name} / OCR確認済み`;
+}
+
+function formatPageRefs(pageRefs: number[]): string {
+  if (pageRefs.length === 0) return '未設定';
+  return pageRefs.map((pageNo) => `p.${pageNo}`).join(', ');
+}
+
+function formatTradeNames(tradeNames: string[]): string {
+  return tradeNames.length > 0 ? tradeNames.join(', ') : '未設定';
+}
+
+function formatPhotoSummary(photoUrls: string[]): string {
+  if (photoUrls.length === 0) return '未登録';
+  return `${photoUrls.length}枚`;
 }
 
 function buildZoneCoverageIssues(block: EstimateBlock, result: CalculationResult): ReviewIssue[] {
@@ -69,6 +91,42 @@ function buildZoneCoverageIssues(block: EstimateBlock, result: CalculationResult
       fieldName: 'zones',
     }),
   ];
+}
+
+function buildZoneMetadataIssues(block: EstimateBlock): ReviewIssue[] {
+  const zones = Array.isArray(block.zones) ? block.zones.filter((zone) => zone.name.trim()) : [];
+  const issues: ReviewIssue[] = [];
+
+  for (const zone of zones) {
+    if (zone.primaryQuantity > 0 && zone.drawingPageRefs.length === 0) {
+      issues.push(createReviewIssue({
+        severity: 'warning',
+        title: `区画「${zone.name}」の図面根拠未設定`,
+        detail: '変更見積に使う図面ページが未設定です。区画ごとの根拠ページを入れてください。',
+        fieldName: 'zones',
+      }));
+    }
+
+    if (zone.coordinationAdjustmentRate > 0 && zone.relatedTradeNames.length === 0) {
+      issues.push(createReviewIssue({
+        severity: 'warning',
+        title: `区画「${zone.name}」の干渉工種未設定`,
+        detail: '他工種調整率を計上していますが、対象工種名が未設定です。設備・植栽・建築外構などの相手工種を入れてください。',
+        fieldName: 'zones',
+      }));
+    }
+
+    if ((zone.temporaryRestorationRate > 0 || zone.note.trim()) && zone.notePhotoUrls.length === 0) {
+      issues.push(createReviewIssue({
+        severity: 'info',
+        title: `区画「${zone.name}」の備考写真未設定`,
+        detail: '仮復旧や施工干渉の説明はありますが、備考写真が未設定です。変更見積の根拠写真があれば紐づけてください。',
+        fieldName: 'zones',
+      }));
+    }
+  }
+
+  return issues;
 }
 
 function buildRequiredFieldIssues(block: EstimateBlock): ReviewIssue[] {
@@ -138,20 +196,34 @@ export function generateReportBundle({ project, block, drawing, result }: Report
     sourceSummary,
   }));
 
-  const zoneRows = result.zoneBreakdowns.map((zone) => createEstimateRow({
-    section: '区画別配賦',
-    itemName: zone.name,
+  const estimateRowByKey = new Map(result.lineItems.map((lineItem, index) => [lineItem.key, estimateRows[index]]));
+  const changeEstimateRows = result.zoneBreakdowns.map((zone) => createChangeEstimateRow({
+    zoneName: zone.name,
+    itemName: result.displayName,
     specification: `${result.displayName} / ${zone.primaryQuantity}${zone.primaryUnit} / 配賦${zone.quantityShare}%`,
     quantity: zone.primaryQuantity,
     unit: zone.primaryUnit,
-    unitPrice: zone.primaryQuantity > 0 ? Math.round(zone.totalAmount / zone.primaryQuantity) : zone.totalAmount,
-    amount: zone.totalAmount,
-    remarks: `参考配賦。再段取り${zone.remobilizationCount}回 / 仮復旧${zone.temporaryRestorationRate}% / 他工種調整${zone.coordinationAdjustmentRate}%${zone.note ? ` / ${zone.note}` : ''}`,
+    quantityShare: zone.quantityShare,
+    baseAmount: zone.baseAmount,
+    remobilizationCount: zone.remobilizationCount,
+    remobilizationAmount: zone.remobilizationAmount,
+    temporaryRestorationRate: zone.temporaryRestorationRate,
+    temporaryRestorationQuantity: zone.temporaryRestorationQuantity,
+    temporaryRestorationAmount: zone.temporaryRestorationAmount,
+    coordinationAdjustmentRate: zone.coordinationAdjustmentRate,
+    coordinationAdjustmentAmount: zone.coordinationAdjustmentAmount,
+    totalAmount: zone.totalAmount,
+    drawingPageRefs: zone.drawingPageRefs,
+    notePhotoUrls: zone.notePhotoUrls,
+    relatedTradeNames: zone.relatedTradeNames,
+    remarks: [
+      `図面 ${formatPageRefs(zone.drawingPageRefs)}`,
+      `他工種 ${formatTradeNames(zone.relatedTradeNames)}`,
+      `備考写真 ${formatPhotoSummary(zone.notePhotoUrls)}`,
+      zone.note || null,
+    ].filter(Boolean).join(' / '),
     sourceSummary,
   }));
-
-  const allEstimateRows = [...estimateRows, ...zoneRows];
-  const estimateRowByKey = new Map(result.lineItems.map((lineItem, index) => [lineItem.key, estimateRows[index]]));
 
   const evidenceRows = result.priceEvidence.map((evidence) => {
     const estimateRow = estimateRowByKey.get(evidence.lineItemKey);
@@ -180,6 +252,7 @@ export function generateReportBundle({ project, block, drawing, result }: Report
 
   reviewIssues.push(...buildRequiredFieldIssues(block));
   reviewIssues.push(...buildZoneCoverageIssues(block, result));
+  reviewIssues.push(...buildZoneMetadataIssues(block));
 
   for (const fieldName of block.requiresReviewFields) {
     reviewIssues.push(createReviewIssue({
@@ -208,12 +281,15 @@ export function generateReportBundle({ project, block, drawing, result }: Report
   }
 
   return {
-    estimateRows: allEstimateRows,
+    estimateRows,
+    changeEstimateRows,
     unitPriceEvidenceRows: evidenceRows,
     reviewIssues,
     summary: {
       totalAmount: Math.round(result.totalAmount),
-      totalRows: allEstimateRows.length,
+      totalRows: estimateRows.length,
+      changeEstimateRowCount: changeEstimateRows.length,
+      changeEstimateTotalAmount: changeEstimateRows.reduce((sum, row) => sum + row.totalAmount, 0),
       requiresReviewCount: reviewIssues.length,
     },
   };
