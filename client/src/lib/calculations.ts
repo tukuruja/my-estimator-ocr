@@ -311,6 +311,140 @@ function finalizeCommonResult(result: CalculationResult): CalculationResult {
   };
 }
 
+function applyPhasedExecutionAdjustments(
+  result: CalculationResult,
+  block: EstimateBlock,
+  context: RateContext,
+): CalculationResult {
+  const phaseCount = Math.max(1, Math.round(block.splitPhaseCount || 1));
+  const remobilizationCount = Math.max(0, Math.round(block.remobilizationCount || 0));
+  const temporaryRestorationRate = Math.max(0, block.temporaryRestorationRate || 0) / 100;
+  const coordinationAdjustmentRate = Math.max(0, block.coordinationAdjustmentRate || 0) / 100;
+  const hasSplitExecution = phaseCount > 1 || remobilizationCount > 0 || temporaryRestorationRate > 0 || coordinationAdjustmentRate > 0;
+
+  if (!hasSplitExecution) {
+    return result;
+  }
+
+  const averagePhaseQuantity = phaseCount > 0 ? round2(result.primaryQuantity / phaseCount) : 0;
+  const setupUnitPrice = Math.round(
+    context.laborCost * (block.blockType === 'pavement' ? 1.4 : 1.8)
+      + (context.machineUnitPrice > 0 ? context.machineUnitPrice * 0.35 : 0),
+  );
+  const setupAmount = remobilizationCount * setupUnitPrice;
+  const temporaryRestorationQuantity = round2(result.primaryQuantity * temporaryRestorationRate);
+  const temporaryRestorationUnitPrice = Math.round((result.totalAmountPerPrimaryUnit || 0) * 0.35);
+  const temporaryRestorationAmount = Math.round(temporaryRestorationQuantity * temporaryRestorationUnitPrice);
+  const coordinationAdjustmentAmount = Math.round(result.totalAmount * coordinationAdjustmentRate);
+
+  const extraLineItems: CalculationLineItem[] = [
+    createLineItem({
+      key: `${result.workType}.splitSetup`,
+      section: '分割施工',
+      itemName: '再段取り・再搬入',
+      specification: `${phaseCount} 区画施工 / 他工種調整`,
+      quantity: remobilizationCount,
+      unit: '回',
+      unitPrice: setupUnitPrice,
+      amount: setupAmount,
+      remarks: '区画切替時の再段取り・再搬入を計上',
+    }),
+    createLineItem({
+      key: `${result.workType}.temporaryRestore`,
+      section: '分割施工',
+      itemName: '仮復旧・仮養生',
+      specification: `仮復旧率 ${block.temporaryRestorationRate}%`,
+      quantity: temporaryRestorationQuantity,
+      unit: result.primaryUnit,
+      unitPrice: temporaryRestorationUnitPrice,
+      amount: temporaryRestorationAmount,
+      remarks: '先行引渡しや他工種開放に伴う仮復旧分',
+    }),
+    createLineItem({
+      key: `${result.workType}.coordination`,
+      section: '分割施工',
+      itemName: '他工種調整補正',
+      specification: `調整率 ${block.coordinationAdjustmentRate}%`,
+      quantity: 1,
+      unit: '式',
+      unitPrice: coordinationAdjustmentAmount,
+      amount: coordinationAdjustmentAmount,
+      remarks: '住棟・設備・植栽・舗装などの工程干渉を反映',
+    }),
+  ].filter((item) => item.quantity > 0 || item.amount > 0);
+
+  const extraEvidence: CalculationEvidence[] = [
+    createEvidence({
+      lineItemKey: `${result.workType}.splitSetup`,
+      estimateItemName: '再段取り・再搬入',
+      masterType: 'input',
+      masterName: '分割施工再段取り',
+      adoptedUnitPrice: setupUnitPrice,
+      unit: '回',
+      sourceName: '画面入力',
+      sourceVersion: 'manual',
+      effectiveFrom: DEFAULT_EFFECTIVE_DATE,
+      effectiveTo: null,
+      sourcePage: null,
+      reason: '集合住宅外構の分割施工回数から算定',
+      requiresReview: remobilizationCount <= 0,
+    }),
+    createEvidence({
+      lineItemKey: `${result.workType}.temporaryRestore`,
+      estimateItemName: '仮復旧・仮養生',
+      masterType: 'derived',
+      masterName: '仮復旧率',
+      adoptedUnitPrice: temporaryRestorationUnitPrice,
+      unit: result.primaryUnit,
+      sourceName: '画面入力',
+      sourceVersion: 'manual',
+      effectiveFrom: DEFAULT_EFFECTIVE_DATE,
+      effectiveTo: null,
+      sourcePage: null,
+      reason: '主数量 × 仮復旧率で算定',
+      requiresReview: temporaryRestorationRate <= 0,
+    }),
+    createEvidence({
+      lineItemKey: `${result.workType}.coordination`,
+      estimateItemName: '他工種調整補正',
+      masterType: 'derived',
+      masterName: '他工種調整率',
+      adoptedUnitPrice: coordinationAdjustmentAmount,
+      unit: '式',
+      sourceName: '画面入力',
+      sourceVersion: 'manual',
+      effectiveFrom: DEFAULT_EFFECTIVE_DATE,
+      effectiveTo: null,
+      sourcePage: null,
+      reason: '直接工事費 × 他工種調整率で算定',
+      requiresReview: coordinationAdjustmentRate <= 0,
+    }),
+  ].filter((item) => item.adoptedUnitPrice > 0 || item.requiresReview);
+
+  return finalizeCommonResult({
+    ...result,
+    detailSections: [
+      ...result.detailSections,
+      {
+        id: `${result.workType}-phased-execution`,
+        title: '分割施工数量',
+        tone: 'bg-violet-600',
+        metrics: [
+          metric('施工区画数', phaseCount, '区画'),
+          metric('1区画平均数量', averagePhaseQuantity, result.primaryUnit),
+          metric('再段取り回数', remobilizationCount, '回'),
+          metric('仮復旧率', block.temporaryRestorationRate || 0, '%'),
+          metric('仮復旧数量', temporaryRestorationQuantity, result.primaryUnit),
+          metric('他工種調整率', block.coordinationAdjustmentRate || 0, '%'),
+          metric('追加金額', setupAmount + temporaryRestorationAmount + coordinationAdjustmentAmount, '円', 'currency'),
+        ],
+      },
+    ],
+    lineItems: [...result.lineItems, ...extraLineItems],
+    priceEvidence: [...result.priceEvidence, ...extraEvidence],
+  });
+}
+
 function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
   const context = buildRateContext(block, options);
   const result = emptyResult('secondary_product', block.secondaryProduct || '二次製品工', 'm');
@@ -424,7 +558,7 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
     createMasterEvidence('secondary.install', '二次製品据付', null, { masterType: 'input', masterName: '送料（画面入力）', adoptedUnitPrice: shippingCost, unit: '式', reason: '運搬費は案件条件依存のため入力値を採用', requiresReview: shippingCost <= 0 }),
   ];
 
-  return finalizeCommonResult({
+  return applyPhasedExecutionAdjustments(finalizeCommonResult({
     ...result,
     excavationWidth: round2(excavationWidth),
     excavationHeight: round2(excavationHeight),
@@ -490,7 +624,7 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
     ],
     lineItems,
     priceEvidence,
-  });
+  }), block, context);
 }
 
 function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
@@ -567,7 +701,7 @@ function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptio
     createMasterEvidence('retaining.body', '擁壁躯体工', null, { masterType: 'input', masterName: '型枠単価（画面入力）', adoptedUnitPrice: block.formworkCost || 0, unit: 'm2', reason: '型枠材は案件条件依存のため入力値を採用', requiresReview: (block.formworkCost || 0) <= 0 }),
   ];
 
-  return finalizeCommonResult({
+  return applyPhasedExecutionAdjustments(finalizeCommonResult({
     ...result,
     excavationWidth: round2(excavationWidth),
     excavationHeight: round2(excavationHeight),
@@ -620,7 +754,7 @@ function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptio
     ],
     lineItems,
     priceEvidence,
-  });
+  }), block, context);
 }
 
 function calculatePavement(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
@@ -677,7 +811,7 @@ function calculatePavement(block: EstimateBlock, options?: CalculationOptions): 
     createMasterEvidence('pavement.subbase', '下層路盤工', laborMaster, { masterType: 'input', masterName: '標準労務単価', adoptedUnitPrice: laborCost, unit: '人日', reason: '転圧・敷均し労務費の根拠', requiresReview: laborCost <= 0 }),
   ].filter((item) => item.adoptedUnitPrice > 0 || item.requiresReview);
 
-  return finalizeCommonResult({
+  return applyPhasedExecutionAdjustments(finalizeCommonResult({
     ...result,
     excavationWidth: round2(width),
     excavationHeight: round2(surfaceThickness + binderThickness + baseThickness + subBaseThickness),
@@ -697,7 +831,7 @@ function calculatePavement(block: EstimateBlock, options?: CalculationOptions): 
     ],
     lineItems,
     priceEvidence,
-  });
+  }), block, context);
 }
 
 function calculateDemolition(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
@@ -739,7 +873,7 @@ function calculateDemolition(block: EstimateBlock, options?: CalculationOptions)
     createMasterEvidence('demolition.disposal', '殻運搬・処分', disposalMaster, { masterType: 'input', masterName: isConcrete ? 'Co殻処分' : 'As殻処分', adoptedUnitPrice: disposalUnitPrice, unit: 'm3', reason: '産廃処分単価の根拠', requiresReview: !disposalMaster }),
   ];
 
-  return finalizeCommonResult({
+  return applyPhasedExecutionAdjustments(finalizeCommonResult({
     ...result,
     excavationWidth: round2(width),
     excavationHeight: round2(thickness),
@@ -754,7 +888,7 @@ function calculateDemolition(block: EstimateBlock, options?: CalculationOptions)
     ],
     lineItems,
     priceEvidence,
-  });
+  }), block, context);
 }
 
 export function calculate(block: EstimateBlock, options?: CalculationOptions): CalculationResult {

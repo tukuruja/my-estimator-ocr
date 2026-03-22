@@ -6,6 +6,7 @@ import { createAppStateApiMiddleware } from "./appStateApi";
 import { createConsensusApiMiddleware } from "./consensusApi";
 import { createEstimationLogicApiMiddleware } from "./estimationLogicApi";
 import { createMasterApiMiddleware } from "./masterApi";
+import { createOcrLearningApiMiddleware } from "./ocrLearningApi";
 import { createOcrPackApiMiddleware } from "./ocrPackApi";
 import { createReportApiMiddleware } from "./reportApi";
 
@@ -60,6 +61,7 @@ async function startServer() {
 
   app.use(createConsensusApiMiddleware());
   app.use(createEstimationLogicApiMiddleware());
+  app.use(createOcrLearningApiMiddleware());
   app.use(createOcrPackApiMiddleware());
   app.use(createMasterApiMiddleware());
   app.use(createReportApiMiddleware());

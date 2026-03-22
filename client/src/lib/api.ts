@@ -1,5 +1,7 @@
 import type {
   GeneratedReportBundle,
+  OcrLearningContext,
+  OcrLearningEntry,
   ParseDrawingResponse,
   PriceMasterItem,
   ReportGenerationRequest,
@@ -138,15 +140,18 @@ async function ensureJsonApiResponse(
   return response;
 }
 
-async function createParseDrawingJob(file: File, mode: string): Promise<OcrParseJobState> {
+async function createParseDrawingJob(file: File, mode: string, learningContext?: OcrLearningContext): Promise<OcrParseJobState> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('mode', mode);
+  if (learningContext && learningContext.planSectionLinks.length > 0) {
+    formData.append('learningContext', JSON.stringify(learningContext));
+  }
 
-    const response = await fetch(resolveAiApiUrl('/api/ocr/jobs'), {
-      method: 'POST',
-      body: formData,
-    });
+  const response = await fetch(resolveAiApiUrl('/api/ocr/jobs'), {
+    method: 'POST',
+    body: formData,
+  });
   await ensureJsonApiResponse(response, getAiApiUnavailableMessage(), 'OCRジョブの作成に失敗しました。');
   return response.json() as Promise<OcrParseJobState>;
 }
@@ -163,10 +168,11 @@ export async function parseDrawing(
   options?: {
     onProgress?: (job: OcrParseJobState) => void;
     timeoutMs?: number;
+    learningContext?: OcrLearningContext;
   },
 ): Promise<ParseDrawingResponse> {
   try {
-    const initialJob = await createParseDrawingJob(file, mode);
+    const initialJob = await createParseDrawingJob(file, mode, options?.learningContext);
     options?.onProgress?.(initialJob);
 
     const deadline = Date.now() + (options?.timeoutMs ?? OCR_JOB_TIMEOUT_MS);
@@ -194,6 +200,31 @@ export async function parseDrawing(
     }
     throw new Error(getAiApiUnavailableMessage());
   }
+}
+
+export async function fetchOcrLearningEntries(): Promise<OcrLearningEntry[]> {
+  const response = await fetch(resolveAppApiUrl('/api/ocr-learning'), {
+    headers: getWorkspaceHeaders(),
+  });
+  await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), 'OCR 学習データの取得に失敗しました。');
+  const payload = await response.json() as { data?: { entries?: OcrLearningEntry[] } };
+  return Array.isArray(payload.data?.entries) ? payload.data.entries : [];
+}
+
+export async function savePlanSectionLearning(
+  entry: Omit<OcrLearningEntry, 'id' | 'learningType' | 'adoptionCount' | 'createdAt' | 'updatedAt'>,
+): Promise<OcrLearningEntry[]> {
+  const response = await fetch(resolveAppApiUrl('/api/ocr-learning/plan-section-link'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getWorkspaceHeaders(),
+    },
+    body: JSON.stringify(entry),
+  });
+  await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), 'OCR 学習データの保存に失敗しました。');
+  const payload = await response.json() as { data?: { entries?: OcrLearningEntry[] } };
+  return Array.isArray(payload.data?.entries) ? payload.data.entries : [];
 }
 
 export async function fetchMasters(query: {

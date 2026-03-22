@@ -79,7 +79,7 @@ export default function CalculationResults({ result, block }: CalculationResults
         </div>
 
         <div className="mb-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-          下の表では、工種ごとの主要数量と金額内訳を確認できます。帳票の明細はこの試算結果をもとにサーバ側で生成します。
+          下の表では、工種ごとの主要数量と金額内訳を確認できます。集合住宅外構で分割施工する場合は「分割施工数量」に区画数・仮復旧・他工種調整が別立てで出ます。帳票の明細はこの試算結果をもとにサーバ側で生成します。
         </div>
 
         <div className="grid gap-2 xl:grid-cols-2">

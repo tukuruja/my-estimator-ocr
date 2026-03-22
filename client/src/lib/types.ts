@@ -87,6 +87,24 @@ export interface DrawingManualResolution {
   resolvedAt: string;
 }
 
+export interface OcrLearningEntry {
+  id: string;
+  learningType: 'plan_section_link';
+  callout: string;
+  normalizedCallout: string;
+  sourceRole: string;
+  targetRole: string;
+  sourceText: string;
+  targetText: string;
+  sourcePageNo: number;
+  targetPageNo: number;
+  drawingNo?: string;
+  drawingTitle?: string;
+  adoptionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DrawingMediaRoute {
   sourceMediaType: 'cad' | 'ifc' | 'vector_pdf' | 'raster_pdf' | 'image' | 'unknown';
   preferredPipeline: 'direct_text' | 'vector_parse' | 'ocr_cv' | 'manual_review';
@@ -189,6 +207,11 @@ export interface DrawingOcrStructured {
     targetBox: BoundingBox;
     confidence: number;
     reasons: string[];
+  }>;
+  learningMatches: Array<{
+    callout: string;
+    adoptionCount: number;
+    matchedLinks: number;
   }>;
   unresolvedItems: Array<{
     target: string;
@@ -338,6 +361,10 @@ export interface EstimateBlock {
   binderThickness: number;
   demolitionWidth: number;
   demolitionThickness: number;
+  splitPhaseCount: number;
+  remobilizationCount: number;
+  temporaryRestorationRate: number;
+  coordinationAdjustmentRate: number;
   requiresReviewFields: string[];
   appliedCandidateIds: string[];
 }
@@ -531,6 +558,10 @@ export interface ReportGenerationRequest {
   drawing?: Drawing | null;
 }
 
+export interface OcrLearningContext {
+  planSectionLinks: OcrLearningEntry[];
+}
+
 export function createDefaultBlock(projectId: string, name: string = '新規見積', drawingId: string | null = null): EstimateBlock {
   return {
     id: crypto.randomUUID(),
@@ -564,6 +595,10 @@ export function createDefaultBlock(projectId: string, name: string = '新規見�
     binderThickness: 0,
     demolitionWidth: 0,
     demolitionThickness: 0,
+    splitPhaseCount: 1,
+    remobilizationCount: 0,
+    temporaryRestorationRate: 0,
+    coordinationAdjustmentRate: 0,
     requiresReviewFields: [],
     appliedCandidateIds: [],
   };

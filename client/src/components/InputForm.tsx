@@ -286,6 +286,44 @@ function CommonPricingFields({ block, onChange }: Pick<InputFormProps, 'block' |
   );
 }
 
+function SplitExecutionFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <div className="overflow-hidden rounded-md border border-violet-300">
+      <SectionHeader title="集合住宅外構の分割施工条件" color="bg-violet-600" emoji="🧩" />
+      <div className="grid grid-cols-2 gap-3 bg-violet-50 p-3">
+        <FormField
+          label="施工区画数"
+          unit="区画"
+          hint="住棟引渡しや他工種調整で分ける施工区画数です。数量は 総数量 ÷ 区画数 で見ます。"
+        >
+          <NumberInput value={block.splitPhaseCount ?? 1} onChange={(value) => onChange('splitPhaseCount', Math.max(1, Math.round(value)))} />
+        </FormField>
+        <FormField
+          label="再段取り回数"
+          unit="回"
+          hint="区画切替で発生する再搬入・再段取り回数です。追加変更が出たらここだけ更新します。"
+        >
+          <NumberInput value={block.remobilizationCount ?? 0} onChange={(value) => onChange('remobilizationCount', Math.max(0, Math.round(value)))} />
+        </FormField>
+        <FormField
+          label="仮復旧率"
+          unit="%"
+          hint="他者作業のため一時開放・仮復旧が必要な割合です。仮復旧数量 = 主数量 × 仮復旧率。"
+        >
+          <NumberInput value={block.temporaryRestorationRate ?? 0} onChange={(value) => onChange('temporaryRestorationRate', Math.max(0, value))} />
+        </FormField>
+        <FormField
+          label="他工種調整率"
+          unit="%"
+          hint="設備・植栽・建築外構・先行引渡しとの工程干渉を見込む補正率です。"
+        >
+          <NumberInput value={block.coordinationAdjustmentRate ?? 0} onChange={(value) => onChange('coordinationAdjustmentRate', Math.max(0, value))} />
+        </FormField>
+      </div>
+    </div>
+  );
+}
+
 export default function InputForm({ block, onChange }: InputFormProps) {
   const productName = block.secondaryProduct || 'まだ選択していません';
 
@@ -314,6 +352,7 @@ export default function InputForm({ block, onChange }: InputFormProps) {
           </div>
         </div>
 
+        <SplitExecutionFields block={block} onChange={onChange} />
         <CommonPricingFields block={block} onChange={onChange} />
       </div>
     </div>

@@ -100,7 +100,7 @@ export default function OcrInsightPanel({
                           onClick={() => onAdoptLevelCandidate(group.id, item)}
                           className="rounded-md bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-amber-700"
                         >
-                          この候補を採用
+                          採用内容を確認
                         </button>
                       </div>
                     </div>

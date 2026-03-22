@@ -950,16 +950,47 @@ def extract_callout_key(text: str) -> str | None:
     return None
 
 
+def normalize_learning_context(raw_value: str | None) -> dict[str, Any]:
+    if not raw_value:
+        return {"planSectionLinks": []}
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return {"planSectionLinks": []}
+    if not isinstance(parsed, dict):
+        return {"planSectionLinks": []}
+    plan_section_links = parsed.get("planSectionLinks", [])
+    if not isinstance(plan_section_links, list):
+        plan_section_links = []
+    return {
+        "planSectionLinks": [entry for entry in plan_section_links if isinstance(entry, dict)],
+    }
+
+
+def build_learning_link_index(learning_context: dict[str, Any] | None) -> dict[str, list[dict[str, Any]]]:
+    if not learning_context:
+        return {}
+    indexed: dict[str, list[dict[str, Any]]] = {}
+    for entry in learning_context.get("planSectionLinks", []):
+        callout = extract_callout_key(str(entry.get("normalizedCallout") or entry.get("callout") or ""))
+        if not callout:
+            continue
+        indexed.setdefault(callout, []).append(entry)
+    return indexed
+
+
 def infer_plan_section_links(
     ocr_items: list[dict[str, Any]],
     page_roles: list[dict[str, Any]],
     role_alias_map: dict[str, list[str]],
+    learning_context: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     role_map = {
         page_role["pageNo"]: [entry["role"] for entry in page_role.get("roles", [])]
         for page_role in page_roles
     }
     callout_candidates: dict[str, list[dict[str, Any]]] = {}
+    learning_index = build_learning_link_index(learning_context)
 
     for item in ocr_items:
         callout = extract_callout_key(item["text"])
@@ -988,10 +1019,31 @@ def infer_plan_section_links(
                 if plan_entry["pageNo"] == target_entry["pageNo"] and plan_entry["box"] == target_entry["box"]:
                     continue
                 same_page_bonus = -0.04 if plan_entry["pageNo"] == target_entry["pageNo"] else 0.0
+                learned_entries = learning_index.get(callout, [])
+                learned_role_match = any(
+                    str(entry.get("sourceRole")) == plan_entry["role"]
+                    and str(entry.get("targetRole")) == target_entry["role"]
+                    for entry in learned_entries
+                )
+                learned_callout_bonus = 0.08 if learned_role_match else (0.04 if learned_entries else 0.0)
                 confidence = round(
-                    min(0.96, 0.58 + min(plan_entry["confidence"], target_entry["confidence"]) * 0.3 + same_page_bonus),
+                    min(0.98, 0.58 + min(plan_entry["confidence"], target_entry["confidence"]) * 0.3 + same_page_bonus + learned_callout_bonus),
                     4,
                 )
+                reasons = [
+                    (
+                        f"plan page {plan_entry['pageNo']} と {target_entry['role']} page {target_entry['pageNo']}"
+                        if plan_entry["pageNo"] != target_entry["pageNo"]
+                        else f"page {plan_entry['pageNo']} 内で plan と {target_entry['role']}"
+                    )
+                    + f" の同一 callout {callout} を検出",
+                ]
+                if learned_entries:
+                    reasons.append(
+                        "過去に採用した図面リンク履歴を反映"
+                        if learned_role_match
+                        else "同一 callout の過去採用履歴を参考"
+                    )
                 links.append({
                     "id": f"{callout}-{plan_entry['pageNo']}-{target_entry['pageNo']}-{target_entry['role']}",
                     "callout": callout,
@@ -1004,14 +1056,7 @@ def infer_plan_section_links(
                     "targetText": target_entry["text"],
                     "targetBox": target_entry["box"],
                     "confidence": confidence,
-                    "reasons": [
-                        (
-                            f"plan page {plan_entry['pageNo']} と {target_entry['role']} page {target_entry['pageNo']}"
-                            if plan_entry["pageNo"] != target_entry["pageNo"]
-                            else f"page {plan_entry['pageNo']} 内で plan と {target_entry['role']}"
-                        )
-                        + f" の同一 callout {callout} を検出",
-                    ],
+                    "reasons": reasons,
                 })
 
     links.sort(key=lambda item: item["confidence"], reverse=True)
@@ -1026,7 +1071,7 @@ def infer_plan_section_links(
     return deduped[:40]
 
 
-def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str, Any]:
+def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]], learning_context: dict[str, Any] | None = None) -> dict[str, Any]:
     watch_pairs = ARCHIVED_OCR_SKILL_PROFILE.get("ocrWatchPairs", [])
     level_tokens = [normalize_token(token) for token in ARCHIVED_OCR_SKILL_PROFILE.get("levelTokens", [])]
     unit_patterns = ARCHIVED_OCR_SKILL_PROFILE.get("unitPatterns", [])
@@ -1141,7 +1186,17 @@ def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str,
             "roles": sorted(roles, key=lambda role: role["confidence"], reverse=True),
         })
 
-    plan_section_links = infer_plan_section_links(ocr_items, page_roles, role_alias_map)
+    plan_section_links = infer_plan_section_links(ocr_items, page_roles, role_alias_map, learning_context)
+    learning_index = build_learning_link_index(learning_context)
+    learning_matches = [
+        {
+            "callout": callout,
+            "adoptionCount": sum(int(entry.get("adoptionCount", 1)) for entry in learning_index.get(callout, [])),
+            "matchedLinks": sum(1 for link in plan_section_links if link["callout"] == callout),
+        }
+        for callout in sorted(learning_index.keys())
+        if any(link["callout"] == callout for link in plan_section_links)
+    ]
 
     unresolved_items: list[dict[str, Any]] = []
     if level_candidates and ambiguous_candidates:
@@ -1176,6 +1231,7 @@ def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]]) -> dict[str,
         "ambiguousCandidates": ambiguous_candidates[:80],
         "pageRoles": page_roles,
         "planSectionLinks": plan_section_links,
+        "learningMatches": learning_matches[:40],
         "unresolvedItems": unresolved_items,
         "skillSources": ARCHIVED_OCR_SKILL_PROFILE.get("sourceSkills", []),
     }
@@ -1500,6 +1556,7 @@ def process_drawing_payload(
     file_type: str,
     file_bytes: bytes,
     mode: str,
+    learning_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         pages = render_pdf_pages(file_bytes) if file_type == "pdf" else load_image_pages(file_bytes)
@@ -1530,7 +1587,7 @@ def process_drawing_payload(
     sheet_classification = classify_sheet_type(all_ocr_items, titleblock_meta, business_document)
     resolved_units = resolve_units_and_view(titleblock_meta, sheet_classification)
     legend_resolution = resolve_legend_and_abbreviations(all_ocr_items)
-    ocr_structured = extract_structured_ocr_signals(all_ocr_items)
+    ocr_structured = extract_structured_ocr_signals(all_ocr_items, learning_context)
     ai_candidates = extract_candidates(all_ocr_items, mode)
     work_type_candidates = classify_work_types(all_ocr_items, sheet_classification.get("discipline"), business_document)
     review_queue = build_review_queue(
@@ -1576,7 +1633,7 @@ def process_drawing_payload(
     }
 
 
-def run_ocr_job(job_id: str, input_path: str, file_name: str, file_type: str, mode: str, base_url: str) -> None:
+def run_ocr_job(job_id: str, input_path: str, file_name: str, file_type: str, mode: str, base_url: str, learning_context: dict[str, Any] | None = None) -> None:
     state = read_job_state(job_id)
     state["status"] = "processing"
     state["progressMessage"] = "OCR解析中です。ページ変換と候補抽出を実行しています。"
@@ -1591,6 +1648,7 @@ def run_ocr_job(job_id: str, input_path: str, file_name: str, file_type: str, mo
             file_type=file_type,
             file_bytes=file_bytes,
             mode=mode,
+            learning_context=learning_context,
         )
         state["status"] = "completed"
         state["progressMessage"] = "OCR解析が完了しました。"
@@ -1631,6 +1689,7 @@ async def create_parse_drawing_job(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     mode: str = Form("secondary_product"),
+    learningContext: str = Form(""),
 ) -> dict[str, Any]:
     file_bytes = await file.read()
     file_type = validate_upload(file.filename, file_bytes, file.content_type)
@@ -1653,6 +1712,7 @@ async def create_parse_drawing_job(
         "mode": mode,
     }
     write_job_state(job_id, state)
+    learning_context = normalize_learning_context(learningContext)
     background_tasks.add_task(
         run_ocr_job,
         job_id,
@@ -1661,6 +1721,7 @@ async def create_parse_drawing_job(
         file_type,
         mode,
         str(request.base_url),
+        learning_context,
     )
     return state
 
@@ -1675,6 +1736,7 @@ async def parse_drawing(
     request: Request,
     file: UploadFile = File(...),
     mode: str = Form("secondary_product"),
+    learningContext: str = Form(""),
 ) -> dict[str, Any]:
     file_bytes = await file.read()
     file_type = validate_upload(file.filename, file_bytes, file.content_type)
@@ -1684,4 +1746,5 @@ async def parse_drawing(
         file_type=file_type,
         file_bytes=file_bytes,
         mode=mode,
+        learning_context=normalize_learning_context(learningContext),
     )

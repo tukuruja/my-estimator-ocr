@@ -9,7 +9,17 @@ import OcrReviewPanel from '@/components/OcrReviewPanel';
 import type { OcrReviewPanelHandle } from '@/components/OcrReviewPanel';
 import DocumentPanel from '@/components/DocumentPanel';
 import { calculate } from '@/lib/calculations';
-import { fetchMasters, generateReport, getAiApiUnavailableMessage, isAiApiAvailable, parseDrawing, runEstimationLogic, type OcrParseJobState } from '@/lib/api';
+import {
+  fetchMasters,
+  fetchOcrLearningEntries,
+  generateReport,
+  getAiApiUnavailableMessage,
+  isAiApiAvailable,
+  parseDrawing,
+  runEstimationLogic,
+  savePlanSectionLearning,
+  type OcrParseJobState,
+} from '@/lib/api';
 import { canonicalizeMasterName, createSeedMasterItems } from '@/lib/masterData';
 import { buildLevelConflictGroups, groupPlanSectionLinksByCallout, isLevelWatchGroup } from '@/lib/ocrInsights';
 import {
@@ -25,6 +35,8 @@ import {
   type EstimateBlock,
   type GeneratedReportBundle,
   type MasterType,
+  type OcrLearningContext,
+  type OcrLearningEntry,
   type OcrReviewQueueItem,
   type ParseDrawingResponse,
   type PriceMasterItem,
@@ -201,8 +213,109 @@ function EstimationLogicCard({ run, loading, error }: { run: EstimationLogicRunR
   );
 }
 
+type LevelAdoptionTarget = 'currentHeight' | 'plannedHeight' | 'resolve_only';
+
+function LevelAdoptionModal({
+  open,
+  title,
+  candidateText,
+  candidateValue,
+  suggestedField,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  candidateText: string;
+  candidateValue: string | null;
+  suggestedField: keyof EstimateBlock | null;
+  onClose: () => void;
+  onConfirm: (target: LevelAdoptionTarget) => void;
+}) {
+  if (!open) return null;
+
+  const canApplyNumeric = candidateValue !== null && candidateValue !== '' && !Number.isNaN(Number(candidateValue));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4">
+      <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-2xl">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <div className="text-sm font-semibold text-slate-800">高さラベル候補の採用確認</div>
+          <div className="mt-1 text-xs leading-5 text-slate-500">
+            bbox 比較で選んだ候補を、review 解消だけに使うか、現況高 / 計画高へ反映するかを選びます。
+          </div>
+        </div>
+
+        <div className="space-y-3 px-5 py-4">
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{title}</div>
+            <div className="mt-2 text-sm font-semibold text-slate-900">{candidateText}</div>
+            <div className="mt-2 text-xs text-slate-600">
+              抽出値: <span className="font-semibold text-slate-900">{candidateValue ?? '数値なし'}</span>
+              {suggestedField ? (
+                <span className="ml-2 text-slate-500">推奨反映先: {CANDIDATE_LABELS[suggestedField] || suggestedField}</span>
+              ) : null}
+            </div>
+          </div>
+
+          {!canApplyNumeric && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+              数値を確定できないため、この候補は review 解消のみ可能です。
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm('resolve_only')}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            bbox 採用だけ記録
+          </button>
+          <button
+            type="button"
+            disabled={!canApplyNumeric}
+            onClick={() => onConfirm('currentHeight')}
+            className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            現況高へ反映
+          </button>
+          <button
+            type="button"
+            disabled={!canApplyNumeric}
+            onClick={() => onConfirm('plannedHeight')}
+            className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            計画高へ反映
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function updateProjectCollection(projects: Project[], projectId: string, updater: (project: Project) => Project): Project[] {
   return projects.map((project) => (project.id === projectId ? updater(project) : project));
+}
+
+function normalizeCalloutForLearning(callout: string): string {
+  const normalized = callout
+    .replace(/[ー–−]/g, '-')
+    .replace(/詳細図?/g, 'DETAIL')
+    .replace(/\s+/g, '')
+    .toUpperCase();
+  if (normalized.startsWith('DETAIL') && !normalized.startsWith('DETAIL-')) {
+    return normalized.replace(/^DETAIL/, 'DETAIL-');
+  }
+  return normalized;
 }
 
 function masterTypeForCandidate(fieldName: string, blockType: BlockType): MasterType | null {
@@ -283,7 +396,10 @@ function buildDrawingFromParseResponse(
     sheetClassification: payload.sheetClassification,
     resolvedUnits: payload.resolvedUnits,
     legendResolution: payload.legendResolution,
-    ocrStructured: payload.ocrStructured,
+    ocrStructured: payload.ocrStructured ? {
+      ...payload.ocrStructured,
+      learningMatches: payload.ocrStructured.learningMatches ?? [],
+    } : undefined,
     workTypeCandidates: (payload.workTypeCandidates || []).map((candidate) => ({
       id: crypto.randomUUID(),
       blockType: candidate.blockType,
@@ -468,6 +584,12 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const [logicRun, setLogicRun] = useState<EstimationLogicRunResponse | null>(null);
   const [logicRunError, setLogicRunError] = useState<string | null>(null);
   const [isLogicRunning, setIsLogicRunning] = useState(false);
+  const [ocrLearningEntries, setOcrLearningEntries] = useState<OcrLearningEntry[]>([]);
+  const [pendingLevelAdoption, setPendingLevelAdoption] = useState<{
+    groupId: string;
+    item: { pageNo: number; box: BoundingBox; text: string; value: string | null };
+    suggestedField: keyof EstimateBlock | null;
+  } | null>(null);
   const ocrReviewPanelRef = useRef<OcrReviewPanelHandle | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -489,6 +611,17 @@ export default function Home({ preferredBlockType }: HomeProps) {
       } catch {
         if (cancelled) return;
         setMasters(createSeedMasterItems());
+      }
+    })();
+
+    void (async () => {
+      try {
+        const entries = await fetchOcrLearningEntries();
+        if (cancelled) return;
+        setOcrLearningEntries(entries);
+      } catch {
+        if (cancelled) return;
+        setOcrLearningEntries([]);
       }
     })();
 
@@ -552,6 +685,10 @@ export default function Home({ preferredBlockType }: HomeProps) {
     });
   }, [appState, activeBlock?.id, activeBlock?.blockType, activeDrawing?.id, activeProject, preferredBlockType]);
 
+  useEffect(() => {
+    setPendingLevelAdoption(null);
+  }, [activeDrawing?.id, activeBlock?.id, activeProject?.id]);
+
   const activeCandidateId = hoveredCandidateId ?? selectedCandidateId;
   const effectiveDate = new Date().toISOString().slice(0, 10);
   const uploadDisabledReason = isAiApiAvailable() ? null : getAiApiUnavailableMessage();
@@ -566,6 +703,9 @@ export default function Home({ preferredBlockType }: HomeProps) {
     [activeManualResolutions],
   );
   const activeReviewQueue = useMemo(() => deriveDrawingReviewQueue(activeDrawing), [activeDrawing]);
+  const ocrLearningContext = useMemo<OcrLearningContext>(() => ({
+    planSectionLinks: ocrLearningEntries,
+  }), [ocrLearningEntries]);
 
   useEffect(() => {
     if (!activeProject || !activeBlock) {
@@ -812,6 +952,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
     try {
       const payload = await parseDrawing(file, activeBlock.blockType, {
         onProgress: handleOcrJobProgress,
+        learningContext: ocrLearningContext,
       });
       const nextDrawing = buildDrawingFromParseResponse(
         activeProject.id,
@@ -848,7 +989,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
     } finally {
       setIsUploading(false);
     }
-  }, [activeBlock, activeProject, handleOcrJobProgress, masters, replaceActiveProject]);
+  }, [activeBlock, activeProject, handleOcrJobProgress, masters, ocrLearningContext, replaceActiveProject]);
 
   const handleApplyCandidate = useCallback((candidateId: string) => {
     if (!activeProject || !activeBlock || !activeDrawing) return;
@@ -902,13 +1043,22 @@ export default function Home({ preferredBlockType }: HomeProps) {
     }
   }, []);
 
-  const handleAdoptLevelCandidate = useCallback((
+  const handleRequestAdoptLevelCandidate = useCallback((
     groupId: string,
     item: { pageNo: number; box: BoundingBox; text: string; value: string | null },
   ) => {
-    if (!activeProject || !activeDrawing || !activeBlock) return;
+    setPendingLevelAdoption({
+      groupId,
+      item,
+      suggestedField: resolveFieldForLevelGroup(groupId),
+    });
+  }, []);
 
-    const fieldName = resolveFieldForLevelGroup(groupId);
+  const handleConfirmLevelAdoption = useCallback((target: LevelAdoptionTarget) => {
+    if (!activeProject || !activeDrawing || !activeBlock || !pendingLevelAdoption) return;
+
+    const { groupId, item } = pendingLevelAdoption;
+    const fieldName = target === 'resolve_only' ? null : target;
     const numericValue = item.value !== null ? Number(item.value) : null;
 
     replaceActiveProject((project) => ({
@@ -943,12 +1093,13 @@ export default function Home({ preferredBlockType }: HomeProps) {
       }),
     }));
 
+    setPendingLevelAdoption(null);
     toast.success(
       fieldName && Number.isFinite(numericValue)
         ? `「${item.text}」を ${CANDIDATE_LABELS[fieldName] || fieldName} へ採用しました。`
         : `「${item.text}」を採用し、review queue を閉じました。`,
     );
-  }, [activeBlock, activeDrawing, activeProject, replaceActiveProject]);
+  }, [activeBlock, activeDrawing, activeProject, pendingLevelAdoption, replaceActiveProject]);
 
   const handleAdoptPlanSectionLink = useCallback((callout: string, linkId: string) => {
     if (!activeProject || !activeDrawing) return;
@@ -974,6 +1125,26 @@ export default function Home({ preferredBlockType }: HomeProps) {
             }
       )),
     }));
+
+    void savePlanSectionLearning({
+      callout,
+      normalizedCallout: normalizeCalloutForLearning(callout),
+      sourceRole: selectedLink.sourceRole,
+      targetRole: selectedLink.targetRole,
+      sourceText: selectedLink.sourceText,
+      targetText: selectedLink.targetText,
+      sourcePageNo: selectedLink.sourcePageNo,
+      targetPageNo: selectedLink.targetPageNo,
+      drawingNo: activeDrawing.drawingNo || undefined,
+      drawingTitle: activeDrawing.drawingTitle || undefined,
+    })
+      .then((entries) => {
+        setOcrLearningEntries(entries);
+      })
+      .catch((error) => {
+        console.error('Failed to persist OCR learning:', error);
+        toast.error('OCR 学習テーブルの保存に失敗しました。');
+      });
 
     toast.success(`「${callout}」の図面リンクを採用し、review queue を閉じました。`);
   }, [activeDrawing, activeProject, replaceActiveProject]);
@@ -1102,7 +1273,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
             onApplyAllCandidates={handleApplyAllCandidates}
             resolvedLevelKeys={resolvedLevelKeys}
             resolvedLinkKeys={resolvedLinkKeys}
-            onAdoptLevelCandidate={handleAdoptLevelCandidate}
+            onAdoptLevelCandidate={handleRequestAdoptLevelCandidate}
             onAdoptPlanSectionLink={handleAdoptPlanSectionLink}
           />
 
@@ -1143,6 +1314,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
                       <div className="mt-1">寸法候補: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.dimensionCandidates.length}</span></div>
                       <div className="mt-1">watchlist: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.ambiguousCandidates.length}</span></div>
                       <div className="mt-1">図面リンク: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.planSectionLinks.length}</span></div>
+                      <div className="mt-1">再利用学習: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.learningMatches?.length ?? 0}</span></div>
                     </>
                   )}
                 </div>
@@ -1173,6 +1345,16 @@ export default function Home({ preferredBlockType }: HomeProps) {
           </div>
         </div>
       </div>
+
+      <LevelAdoptionModal
+        open={Boolean(pendingLevelAdoption)}
+        title={pendingLevelAdoption?.groupId ?? '高さラベル候補'}
+        candidateText={pendingLevelAdoption?.item.text ?? ''}
+        candidateValue={pendingLevelAdoption?.item.value ?? null}
+        suggestedField={pendingLevelAdoption?.suggestedField ?? null}
+        onClose={() => setPendingLevelAdoption(null)}
+        onConfirm={handleConfirmLevelAdoption}
+      />
 
       <SaveBar autoSave={appState.autoSave} onToggleAutoSave={handleToggleAutoSave} onSave={handleSave} onSaveAs={handleSaveAs} />
     </div>
