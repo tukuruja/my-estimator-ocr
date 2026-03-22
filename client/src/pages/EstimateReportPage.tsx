@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import Header from '@/components/Header';
 import DocumentPanel from '@/components/DocumentPanel';
 import { generateReport } from '@/lib/api';
+import { calculate } from '@/lib/calculations';
 import { loadData } from '@/lib/storage';
+import { buildProjectWorkbookAudit } from '@/lib/workbookAudit';
 import { getWorkTypeLabel } from '@/lib/workTypes';
 import type { AppState, BlockType, GeneratedReportBundle } from '@/lib/types';
 
@@ -67,6 +69,15 @@ export default function EstimateReportPage({ preferredBlockType }: EstimateRepor
     if (!activeProject || !activeBlock || !appState) return null;
     return activeProject.drawings.find((drawing) => drawing.id === (activeBlock.drawingId ?? appState.activeDrawingId)) ?? activeProject.drawings[0] ?? null;
   }, [activeBlock, activeProject, appState]);
+
+  const workbookAudit = useMemo(() => {
+    if (!activeProject) return null;
+    const effectiveDate = new Date().toISOString().slice(0, 10);
+    return buildProjectWorkbookAudit(activeProject, activeProject.blocks.map((block) => ({
+      block,
+      result: calculate(block, { effectiveDate }),
+    })));
+  }, [activeProject]);
 
   useEffect(() => {
     if (!activeProject || !activeBlock) {
@@ -135,6 +146,7 @@ export default function EstimateReportPage({ preferredBlockType }: EstimateRepor
           drawing={activeDrawing}
           projectName={activeProject.name}
           estimateName={activeBlock.name}
+          workbookAudit={workbookAudit}
           reportRequest={{
             project: activeProject,
             block: activeBlock,

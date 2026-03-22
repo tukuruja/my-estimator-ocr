@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Download, FileSpreadsheet, FileText, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
-import type { ChangeEstimateReportHeader, Drawing, GeneratedReportBundle, ReportGenerationRequest, WorkTypeCandidate } from '@/lib/types';
+import type { ChangeEstimateReportHeader, Drawing, GeneratedReportBundle, ReportGenerationRequest, WorkTypeCandidate, WorkbookAuditBundle } from '@/lib/types';
 import { generateChangeEstimatePdf } from '@/lib/api';
 
 interface DocumentPanelProps {
@@ -11,9 +11,10 @@ interface DocumentPanelProps {
   projectName: string;
   estimateName: string;
   reportRequest: ReportGenerationRequest;
+  workbookAudit: WorkbookAuditBundle | null;
 }
 
-type TabKey = 'estimate' | 'change' | 'evidence' | 'review';
+type TabKey = 'estimate' | 'change' | 'evidence' | 'review' | 'workbook-audit';
 
 function exportCsv(fileName: string, headers: string[], rows: Array<Array<string | number | null>>) {
   const csvRows = [headers, ...rows].map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','));
@@ -36,7 +37,7 @@ function WorkTypeBadge({ candidate }: { candidate: WorkTypeCandidate }) {
   );
 }
 
-export default function DocumentPanel({ bundle, drawing, projectName, estimateName, reportRequest }: DocumentPanelProps) {
+export default function DocumentPanel({ bundle, drawing, projectName, estimateName, reportRequest, workbookAudit }: DocumentPanelProps) {
   const [tab, setTab] = useState<TabKey>('estimate');
   const [header, setHeader] = useState<ChangeEstimateReportHeader>(() => ({
     issueDate: new Date().toISOString().slice(0, 10),
@@ -136,6 +137,15 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
         >
           要確認一覧
         </button>
+        {workbookAudit && (
+          <button
+            type="button"
+            onClick={() => setTab('workbook-audit')}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold ${tab === 'workbook-audit' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+          >
+            内訳監査
+          </button>
+        )}
       </div>
 
       <div className="max-h-[780px] overflow-auto p-4">
@@ -422,6 +432,92 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {tab === 'workbook-audit' && workbookAudit && (
+          <div>
+            <div className="mb-3 flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs leading-5 text-slate-600">
+                <div className="font-semibold text-slate-800">{workbookAudit.projectLabel}</div>
+                <div className="mt-1">基準内訳書: {workbookAudit.sourceWorkbook}</div>
+                <div className="mt-1">
+                  一致 {workbookAudit.summary.matchedRows} 件 / 差分 {workbookAudit.summary.mismatchRows} 件 / 未作成 {workbookAudit.summary.missingRows} 件 / 未対応 {workbookAudit.summary.unsupportedRows} 件
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => exportCsv(
+                  `${filePrefix}_内訳監査.csv`,
+                  ['区分', '項目', '仕様', '内訳書数量', '単位', 'アプリ数量', 'アプリ単位', '差分', '判定', '内訳書ロジック', 'アプリロジック', 'メモ'],
+                  workbookAudit.rows.map((row) => [
+                    row.section,
+                    row.itemName,
+                    row.specification,
+                    row.workbookQuantity,
+                    row.workbookUnit,
+                    row.appQuantity ?? '',
+                    row.appUnit ?? '',
+                    row.difference ?? '',
+                    row.status,
+                    row.workbookLogic,
+                    row.appLogic,
+                    row.notes.join(' / '),
+                  ]),
+                )}
+                className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+              >
+                <Download className="h-4 w-4" /> CSV出力
+              </button>
+            </div>
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-slate-50 text-slate-600">
+                <tr className="border-b border-slate-200">
+                  <th className="px-2 py-2 text-left">区分</th>
+                  <th className="px-2 py-2 text-left">項目</th>
+                  <th className="px-2 py-2 text-right">内訳書</th>
+                  <th className="px-2 py-2 text-right">アプリ</th>
+                  <th className="px-2 py-2 text-right">差分</th>
+                  <th className="px-2 py-2 text-left">判定</th>
+                  <th className="px-2 py-2 text-left">式の解釈</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workbookAudit.rows.map((row) => {
+                  const tone = row.status === 'matched'
+                    ? 'bg-emerald-50'
+                    : row.status === 'mismatch'
+                      ? 'bg-amber-50'
+                      : row.status === 'missing_block'
+                        ? 'bg-rose-50'
+                        : 'bg-slate-50';
+                  return (
+                    <tr key={row.id} className={`border-b border-slate-100 align-top ${tone}`}>
+                      <td className="px-2 py-2">{row.section}</td>
+                      <td className="px-2 py-2">
+                        <div className="font-semibold text-slate-900">{row.itemName}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{row.specification}</div>
+                      </td>
+                      <td className="px-2 py-2 text-right">{row.workbookQuantity.toLocaleString('ja-JP', { maximumFractionDigits: 2 })}{row.workbookUnit}</td>
+                      <td className="px-2 py-2 text-right">{row.appQuantity !== null ? `${row.appQuantity.toLocaleString('ja-JP', { maximumFractionDigits: 2 })}${row.appUnit ?? ''}` : '未算定'}</td>
+                      <td className="px-2 py-2 text-right">{row.difference !== null ? `${row.difference > 0 ? '+' : ''}${row.difference.toLocaleString('ja-JP', { maximumFractionDigits: 2 })}${row.workbookUnit}` : '-'}</td>
+                      <td className="px-2 py-2">
+                        <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] font-semibold text-slate-700">
+                          {row.status === 'matched' ? '一致' : row.status === 'mismatch' ? '差分あり' : row.status === 'missing_block' ? 'block未作成' : 'モデル未対応'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="font-medium text-slate-800">{row.workbookLogic}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{row.appLogic}</div>
+                        {row.notes.length > 0 && (
+                          <div className="mt-1 text-[11px] text-slate-500">{row.notes.join(' / ')}</div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

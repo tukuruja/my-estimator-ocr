@@ -471,6 +471,37 @@ export interface GeneratedReportBundle {
   };
 }
 
+export type WorkbookAuditStatus = 'matched' | 'mismatch' | 'missing_block' | 'unsupported_logic';
+
+export interface WorkbookAuditRow {
+  id: string;
+  section: string;
+  itemName: string;
+  specification: string;
+  workbookQuantity: number;
+  workbookUnit: string;
+  appQuantity: number | null;
+  appUnit: string | null;
+  difference: number | null;
+  status: WorkbookAuditStatus;
+  workbookLogic: string;
+  appLogic: string;
+  notes: string[];
+}
+
+export interface WorkbookAuditBundle {
+  projectLabel: string;
+  sourceWorkbook: string;
+  rows: WorkbookAuditRow[];
+  summary: {
+    totalRows: number;
+    matchedRows: number;
+    mismatchRows: number;
+    missingRows: number;
+    unsupportedRows: number;
+  };
+}
+
 export interface Drawing {
   id: string;
   projectId: string;

@@ -59,6 +59,7 @@ import {
 } from '@/lib/types';
 import { loadData, saveData } from '@/lib/storage';
 import { getWorkTypeLabel } from '@/lib/workTypes';
+import { buildProjectWorkbookAudit } from '@/lib/workbookAudit';
 import type { EstimationLogicRunResponse } from '@shared/estimationLogic';
 import { getShiroyamaLogicForBlockType, SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC } from '@shared/shiroyamaExteriorEstimateLogic';
 import { toast } from 'sonner';
@@ -1297,6 +1298,14 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const effectiveDate = new Date().toISOString().slice(0, 10);
   const uploadDisabledReason = isAiApiAvailable() ? null : getAiApiUnavailableMessage();
   const result = useMemo(() => (activeBlock ? calculate(activeBlock, { masters, effectiveDate }) : null), [activeBlock, effectiveDate, masters]);
+  const workbookAudit = useMemo(() => {
+    if (!activeProject) return null;
+    const blockResults = activeProject.blocks.map((block) => ({
+      block,
+      result: calculate(block, { masters, effectiveDate }),
+    }));
+    return buildProjectWorkbookAudit(activeProject, blockResults);
+  }, [activeProject, effectiveDate, masters]);
   const activeManualResolutions = activeDrawing?.manualResolutions ?? [];
   const resolvedLevelKeys = useMemo(
     () => activeManualResolutions.filter((item) => item.resolutionType === 'level_conflict').map((item) => item.resolutionKey),
@@ -2183,6 +2192,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
               drawing={activeDrawing}
               projectName={activeProject.name}
               estimateName={activeBlock.name}
+              workbookAudit={workbookAudit}
               reportRequest={{
                 project: activeProject,
                 block: activeBlock,
