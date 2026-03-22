@@ -281,6 +281,63 @@ function DemolitionFields({ block, onChange }: Pick<InputFormProps, 'block' | 'o
   );
 }
 
+function CountStructureFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="数量対象名" hint="街渠桝、接続桝、L形側溝桝など count で扱う名称です。" className="col-span-2">
+        <TextInput value={block.secondaryProduct} onChange={(value) => onChange('secondaryProduct', value)} placeholder="例: 街渠桝A 一般部" />
+      </FormField>
+      <FormField label="数量" unit={block.countUnit || '箇所'} hint="箇所、本、基などの主数量です。">
+        <NumberInput value={block.countQuantity} onChange={(value) => onChange('countQuantity', Math.max(0, Math.round(value)))} />
+      </FormField>
+      <FormField label="数量単位" hint="通常は 箇所 / 基 / 本 を使います。">
+        <TextInput value={block.countUnit} onChange={(value) => onChange('countUnit', value || '箇所')} placeholder="例: 箇所" />
+      </FormField>
+      <FormField label="数量単価" unit={`円/${block.countUnit || '箇所'}`} hint="案件単価が決まっていれば入力します。監査だけなら 0 で構いません。" className="col-span-2">
+        <NumberInput value={block.customUnitPrice} onChange={(value) => onChange('customUnitPrice', Math.max(0, value))} />
+      </FormField>
+    </>
+  );
+}
+
+function MaterialTakeoffFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="材料・監査対象名" hint="RC-40、RM-40、地盤改良、フィルター層などを入力します。" className="col-span-2">
+        <TextInput value={block.secondaryProduct} onChange={(value) => onChange('secondaryProduct', value)} placeholder="例: 下層路盤 RC-40 t=15cm" />
+      </FormField>
+      <FormField label="監査単位" hint="m3 監査か t 監査かを選びます。">
+        <select
+          className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm transition-all focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+          value={block.materialTakeoffMode}
+          onChange={(event) => onChange('materialTakeoffMode', event.target.value)}
+        >
+          <option value="m3">m3 監査</option>
+          <option value="t">t 監査</option>
+        </select>
+      </FormField>
+      <FormField label="直接数量" unit={block.materialTakeoffMode} hint="workbook の材料数量が直接ある場合に入れます。未入力なら 面積×厚み から算定します。">
+        <NumberInput value={block.materialDirectQuantity} onChange={(value) => onChange('materialDirectQuantity', Math.max(0, value))} />
+      </FormField>
+      <FormField label="基準面積" unit="m²" hint="舗装・地盤改良の対象面積です。">
+        <NumberInput value={block.materialArea} onChange={(value) => onChange('materialArea', Math.max(0, value))} />
+      </FormField>
+      <FormField label="層厚・改良厚" unit="m" hint="t=150 なら 0.15、t=850 なら 0.85 と入力します。">
+        <NumberInput value={block.materialThickness} onChange={(value) => onChange('materialThickness', Math.max(0, value))} />
+      </FormField>
+      <FormField label="体積係数" unit="倍" hint="膨張、割増、ロスがある場合の係数です。通常 1.0。">
+        <NumberInput value={block.materialVolumeFactor} onChange={(value) => onChange('materialVolumeFactor', Math.max(0, value || 0))} />
+      </FormField>
+      <FormField label="換算密度" unit="t/m³" hint="t 監査時に使う換算密度です。m3 監査だけなら 0 のままで構いません。">
+        <NumberInput value={block.materialDensity} onChange={(value) => onChange('materialDensity', Math.max(0, value))} />
+      </FormField>
+      <FormField label="数量単価" unit={`円/${block.materialTakeoffMode}`} hint="材料単価が決まっていれば入力します。監査だけなら 0 で構いません。" className="col-span-2">
+        <NumberInput value={block.customUnitPrice} onChange={(value) => onChange('customUnitPrice', Math.max(0, value))} />
+      </FormField>
+    </>
+  );
+}
+
 function CommonPricingFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
   return (
     <div className="space-y-2">
@@ -374,6 +431,14 @@ function SplitExecutionFields({ block, onChange }: Pick<InputFormProps, 'block' 
 }
 
 function ZoneBreakdownFields({ block, onZoneChange, onAddZone, onRemoveZone }: Pick<InputFormProps, 'block' | 'onZoneChange' | 'onAddZone' | 'onRemoveZone'>) {
+  const zoneUnit = block.blockType === 'pavement' || block.blockType === 'demolition'
+    ? 'm²'
+    : block.blockType === 'count_structure'
+      ? (block.countUnit || '箇所')
+      : block.blockType === 'material_takeoff'
+        ? block.materialTakeoffMode
+        : 'm';
+
   return (
     <div className="overflow-hidden rounded-md border border-cyan-300">
       <SectionHeader title="区画別見積" color="bg-cyan-600" emoji="🗂" />
@@ -407,7 +472,7 @@ function ZoneBreakdownFields({ block, onZoneChange, onAddZone, onRemoveZone }: P
               <FormField label="区画名" hint="変更見積でも同じ名前を使います。" className="col-span-2">
                 <TextInput value={zone.name} onChange={(value) => onZoneChange(zone.id, 'name', value)} placeholder="例: A棟前" />
               </FormField>
-              <FormField label="区画主数量" unit={block.blockType === 'pavement' || block.blockType === 'demolition' ? 'm²' : 'm'} hint="この区画に該当する延長または面積です。">
+              <FormField label="区画主数量" unit={zoneUnit} hint="この区画に該当する主数量です。延長・面積・箇所・材料数量のいずれかを入れます。">
                 <NumberInput value={zone.primaryQuantity} onChange={(value) => onZoneChange(zone.id, 'primaryQuantity', Math.max(0, value))} />
               </FormField>
               <FormField label="再段取り回数" unit="回" hint="この区画で個別に増える再搬入回数です。">
@@ -487,6 +552,8 @@ export default function InputForm({ block, onChange, onZoneChange, onAddZone, on
             {block.blockType === 'retaining_wall' && <RetainingWallFields block={block} onChange={onChange} />}
             {block.blockType === 'pavement' && <PavementFields block={block} onChange={onChange} />}
             {block.blockType === 'demolition' && <DemolitionFields block={block} onChange={onChange} />}
+            {block.blockType === 'count_structure' && <CountStructureFields block={block} onChange={onChange} />}
+            {block.blockType === 'material_takeoff' && <MaterialTakeoffFields block={block} onChange={onChange} />}
           </div>
         </div>
 

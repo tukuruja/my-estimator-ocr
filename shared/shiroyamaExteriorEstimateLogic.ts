@@ -97,6 +97,24 @@ export const SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC: ExteriorEstimateLogicProfile = {
         workbookExamples: ['既存南側擁壁撤去 33.6m', '舗装変更 29.9m2 / 26.8m2 / 20.7m2'],
       },
     ],
+    count_structure: [
+      {
+        id: 'count-structure-separate',
+        title: '桝類は箇所 root に切り分ける',
+        interpretation: '集水桝や管理桝は延長系 block に混ぜず、箇所で別監査する。',
+        formula: 'quantity = count',
+        workbookExamples: ['集水桝 1箇所', '管理桝 5箇所'],
+      },
+    ],
+    material_takeoff: [
+      {
+        id: 'material-volume-difference',
+        title: '浸透貯留槽系は m3 root で監査する',
+        interpretation: '基礎砕石・調整砂・残土処分は延長ではなく m3 root。面積×厚み、または差し引き体積×係数で扱う。',
+        formula: 'quantity_m3 = area×thickness or (excavation-backfill)×factor',
+        workbookExamples: ['255.3m2 × 0.15 = 38.3m3', '(209.8-158.7)×1.1 = 56.2m3'],
+      },
+    ],
   },
 };
 

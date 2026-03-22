@@ -425,7 +425,7 @@ export const CONSTRUCTION_CONSENSUS_OUTPUT_SCHEMA: Record<string, unknown> = {
       properties: {
         adoptedBlockType: {
           type: 'string',
-          enum: ['secondary_product', 'retaining_wall', 'pavement', 'demolition'],
+          enum: ['secondary_product', 'retaining_wall', 'pavement', 'demolition', 'count_structure', 'material_takeoff'],
         },
         confidence: { type: 'number' },
         reason: { type: 'string' },
@@ -636,6 +636,8 @@ const BLOCK_MASTER_TYPES: Record<EstimateBlock['blockType'], MasterType[]> = {
   retaining_wall: ['secondary_product', 'machine', 'dump_truck', 'crushed_stone', 'concrete', 'pump_truck', 'labor', 'misc'],
   pavement: ['road', 'machine', 'dump_truck', 'crushed_stone', 'concrete', 'labor', 'misc'],
   demolition: ['road', 'machine', 'dump_truck', 'cutter', 'labor', 'misc'],
+  count_structure: ['secondary_product', 'misc', 'labor'],
+  material_takeoff: ['road', 'crushed_stone', 'misc', 'labor'],
 };
 
 export const CONSTRUCTION_CONSENSUS_BLUEPRINT: ConstructionConsensusBlueprint = {
@@ -708,7 +710,7 @@ function selectKnowledgePacks(block: EstimateBlock, drawing: Drawing | null): Co
   return CONSTRUCTION_KNOWLEDGE_PACKS.map((pack) => {
     const matchesBlockType = pack.blockTypes.includes('all') || pack.blockTypes.includes(block.blockType);
     const isBuildingWatchPack = pack.id === 'apartment-estimate-input';
-    const buildingSignal = strongestCandidate && !['secondary_product', 'retaining_wall', 'pavement', 'demolition'].includes(strongestCandidate);
+    const buildingSignal = strongestCandidate && !['secondary_product', 'retaining_wall', 'pavement', 'demolition', 'count_structure', 'material_takeoff'].includes(strongestCandidate);
 
     if (pack.outputMode === 'future_scope') {
       return {

@@ -1,10 +1,17 @@
 export type BoundingBox = [number, number, number, number, number, number, number, number];
 
-export type BlockType = 'secondary_product' | 'retaining_wall' | 'pavement' | 'demolition';
+export type BlockType =
+  | 'secondary_product'
+  | 'retaining_wall'
+  | 'pavement'
+  | 'demolition'
+  | 'count_structure'
+  | 'material_takeoff';
 export type ProjectStatus = 'draft' | 'active' | 'approved' | 'archived';
 export type DrawingStatus = 'idle' | 'uploaded' | 'processing' | 'ready' | 'error';
 export type DrawingFileType = 'pdf' | 'image';
 export type CandidateValueType = 'string' | 'number';
+export type MaterialTakeoffMode = 'm3' | 't';
 export type MasterType =
   | 'secondary_product'
   | 'machine'
@@ -590,6 +597,15 @@ export interface EstimateBlock {
   binderThickness: number;
   demolitionWidth: number;
   demolitionThickness: number;
+  countQuantity: number;
+  countUnit: string;
+  materialTakeoffMode: MaterialTakeoffMode;
+  materialArea: number;
+  materialThickness: number;
+  materialVolumeFactor: number;
+  materialDensity: number;
+  materialDirectQuantity: number;
+  customUnitPrice: number;
   splitPhaseCount: number;
   remobilizationCount: number;
   temporaryRestorationRate: number;
@@ -878,6 +894,15 @@ export function createDefaultBlock(projectId: string, name: string = '新規見�
     binderThickness: 0,
     demolitionWidth: 0,
     demolitionThickness: 0,
+    countQuantity: 0,
+    countUnit: '箇所',
+    materialTakeoffMode: 'm3',
+    materialArea: 0,
+    materialThickness: 0,
+    materialVolumeFactor: 1,
+    materialDensity: 0,
+    materialDirectQuantity: 0,
+    customUnitPrice: 0,
     splitPhaseCount: 1,
     remobilizationCount: 0,
     temporaryRestorationRate: 0,

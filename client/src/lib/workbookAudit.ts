@@ -31,6 +31,9 @@ type WorkbookAuditReferenceRow = {
     baseThickness?: number;
     demolitionWidth?: number;
     demolitionThickness?: number;
+    countUnit?: string;
+    materialTakeoffMode?: 'm3' | 't';
+    materialThickness?: number;
   };
 };
 
@@ -89,6 +92,12 @@ const SHIROYAMA_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
     quantity: 38.3,
     unit: 'm3',
     workbookLogic: '面積×厚み。255.3×0.15=38.295 → 38.3。',
+    blockType: 'material_takeoff',
+    matcher: {
+      secondaryProductIncludes: ['基礎砕石'],
+      materialTakeoffMode: 'm3',
+      materialThickness: 0.15,
+    },
   },
   {
     id: 'storage-sand',
@@ -98,6 +107,12 @@ const SHIROYAMA_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
     quantity: 12.8,
     unit: 'm3',
     workbookLogic: '面積×厚み。255.3×0.05=12.765 → 12.8。',
+    blockType: 'material_takeoff',
+    matcher: {
+      secondaryProductIncludes: ['調整砂'],
+      materialTakeoffMode: 'm3',
+      materialThickness: 0.05,
+    },
   },
   {
     id: 'storage-disposal',
@@ -107,6 +122,11 @@ const SHIROYAMA_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
     quantity: 56.2,
     unit: 'm3',
     workbookLogic: '差し引き体積に係数 1.1 を乗じる。',
+    blockType: 'material_takeoff',
+    matcher: {
+      secondaryProductIncludes: ['残土処分'],
+      materialTakeoffMode: 'm3',
+    },
   },
   {
     id: 'pavement-parking',
@@ -304,6 +324,11 @@ const SHINMORI_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
     quantity: 38,
     unit: '箇所',
     workbookLogic: '桝は count root。現行 block は延長系なので別モデルが必要。',
+    blockType: 'count_structure',
+    matcher: {
+      secondaryProductIncludes: ['街渠桝'],
+      countUnit: '箇所',
+    },
   },
   {
     id: 'shinmori-connection-a',
@@ -313,6 +338,11 @@ const SHINMORI_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
     quantity: 2,
     unit: '箇所',
     workbookLogic: '接続桝は count root。現行 block では直接比較しない。',
+    blockType: 'count_structure',
+    matcher: {
+      secondaryProductIncludes: ['接続桝'],
+      countUnit: '箇所',
+    },
   },
   {
     id: 'shinmori-lmanhole-general',
@@ -322,6 +352,11 @@ const SHINMORI_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
     quantity: 32,
     unit: '箇所',
     workbookLogic: 'L形側溝桝は count root。延長系 block とは分けて監査する。',
+    blockType: 'count_structure',
+    matcher: {
+      secondaryProductIncludes: ['側溝桝'],
+      countUnit: '箇所',
+    },
   },
   {
     id: 'shinmori-roadbed-rc40',
@@ -331,6 +366,12 @@ const SHINMORI_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
     quantity: 663.13,
     unit: 'm3',
     workbookLogic: 'この行は面積 root ではなく材料数量。面積×厚みが未確定だと一致監査できない。',
+    blockType: 'material_takeoff',
+    matcher: {
+      secondaryProductIncludes: ['RC-40', '下層路盤'],
+      materialTakeoffMode: 'm3',
+      materialThickness: 0.15,
+    },
   },
   {
     id: 'shinmori-rm40-15',
@@ -340,6 +381,12 @@ const SHINMORI_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
     quantity: 656,
     unit: 'm3',
     workbookLogic: '材料層の数量。舗装面積 root と分けて扱う必要がある。',
+    blockType: 'material_takeoff',
+    matcher: {
+      secondaryProductIncludes: ['RM-40'],
+      materialTakeoffMode: 'm3',
+      materialThickness: 0.15,
+    },
   },
   {
     id: 'shinmori-ground-improvement',
@@ -349,6 +396,11 @@ const SHINMORI_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
     quantity: 3283,
     unit: 't',
     workbookLogic: '置換工は tonnage root。現行アプリは ton 直算モデルを持たない。',
+    blockType: 'material_takeoff',
+    matcher: {
+      secondaryProductIncludes: ['地盤改良', '置き換え工'],
+      materialTakeoffMode: 't',
+    },
   },
 ];
 
@@ -403,6 +455,18 @@ function describeAppLogic(block: EstimateBlock, result: CalculationResult): stri
     details.push(`W=${block.demolitionWidth || block.pavementWidth || block.productWidth}m`);
     details.push(`t=${block.demolitionThickness || block.surfaceThickness}m`);
   }
+  if (block.blockType === 'count_structure') {
+    details.push(`数量=${block.countQuantity}${block.countUnit || '箇所'}`);
+  }
+  if (block.blockType === 'material_takeoff') {
+    details.push(`監査=${block.materialTakeoffMode}`);
+    if (block.materialDirectQuantity > 0) {
+      details.push(`直接数量=${block.materialDirectQuantity}${block.materialTakeoffMode}`);
+    } else {
+      details.push(`面積=${block.materialArea}m2`);
+      details.push(`厚み=${block.materialThickness}m`);
+    }
+  }
   return details.join(' / ');
 }
 
@@ -435,6 +499,15 @@ function blockMatchesReference(reference: WorkbookAuditReferenceRow, block: Esti
     return false;
   }
   if (matcher.demolitionThickness !== undefined && !closeEnough(block.demolitionThickness || block.surfaceThickness, matcher.demolitionThickness)) {
+    return false;
+  }
+  if (matcher.countUnit !== undefined && (block.countUnit || '').trim() !== matcher.countUnit) {
+    return false;
+  }
+  if (matcher.materialTakeoffMode !== undefined && block.materialTakeoffMode !== matcher.materialTakeoffMode) {
+    return false;
+  }
+  if (matcher.materialThickness !== undefined && !closeEnough(block.materialThickness, matcher.materialThickness)) {
     return false;
   }
 

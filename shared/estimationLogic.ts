@@ -140,6 +140,8 @@ const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
   retaining_wall: '擁壁工',
   pavement: '舗装工',
   demolition: '撤去工',
+  count_structure: '街渠桝・接続桝工',
+  material_takeoff: '材料数量監査',
 };
 
 const REQUIRED_FIELDS_BY_BLOCK_TYPE: Record<BlockType, Array<keyof EstimateBlock>> = {
@@ -147,6 +149,8 @@ const REQUIRED_FIELDS_BY_BLOCK_TYPE: Record<BlockType, Array<keyof EstimateBlock
   retaining_wall: ['distance', 'currentHeight', 'plannedHeight', 'productWidth'],
   pavement: ['distance', 'pavementWidth', 'baseThickness'],
   demolition: ['distance', 'currentHeight', 'plannedHeight'],
+  count_structure: ['secondaryProduct', 'countQuantity', 'countUnit'],
+  material_takeoff: ['secondaryProduct', 'materialTakeoffMode'],
 };
 
 function isEmptyValue(value: unknown): boolean {
@@ -167,6 +171,13 @@ function toFieldLabel(fieldName: keyof EstimateBlock): string {
     stages: '据付段数',
     pavementWidth: '舗装幅',
     baseThickness: '基層厚',
+    countQuantity: 'count数量',
+    countUnit: 'count単位',
+    materialTakeoffMode: '監査単位',
+    materialArea: '基準面積',
+    materialThickness: '層厚・改良厚',
+    materialDensity: '換算密度',
+    materialDirectQuantity: '直接数量',
   };
   return labels[fieldName] ?? fieldName;
 }

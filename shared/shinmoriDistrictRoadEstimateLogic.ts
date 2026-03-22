@@ -113,6 +113,39 @@ export const SHINMORI_DISTRICT_ROAD_ESTIMATE_LOGIC: DistrictRoadEstimateLogicPro
         workbookExamples: ['工事概要 PDF に撤去工が出ても、数量表正本は １次見積もりを優先'],
       },
     ],
+    count_structure: [
+      {
+        id: 'count-structure-root',
+        title: '街渠桝・接続桝は箇所 root で持つ',
+        interpretation: '桝類は延長ではなく 箇所/基 を主数量とする。側溝延長と同じ block に混ぜない。',
+        formula: 'quantity = count',
+        workbookExamples: [
+          '街渠桝Ａ 一般部 → 38箇所',
+          '接続桝Ａ 一般部 → 2箇所',
+        ],
+      },
+    ],
+    material_takeoff: [
+      {
+        id: 'material-volume-root',
+        title: '舗装材層は m3 root で監査する',
+        interpretation: 'RC-40、RM-40 の行は面積そのものではなく、面積×厚みで得た材料数量 m3 として監査する。',
+        formula: 'quantity_m3 = area_m2 × thickness_m × factor',
+        workbookExamples: [
+          'RC-40 t=15cm → 663.13m3',
+          'RM-40 t=15cm → 656m3',
+        ],
+      },
+      {
+        id: 'ground-improvement-ton-root',
+        title: '地盤改良は t root で監査する',
+        interpretation: '置換・改良は面積 root ではなく tonnage root で比較する。必要なら m3 から密度換算する。',
+        formula: 'quantity_t = volume_m3 × density_t_per_m3',
+        workbookExamples: [
+          '地盤改良 置き換え工 t=850 → 3,283t',
+        ],
+      },
+    ],
   },
 };
 

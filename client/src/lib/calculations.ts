@@ -167,6 +167,19 @@ function adoptMaster(masters: PriceMasterItem[], masterType: MasterType, name: s
   return findMasterByName(masters, masterType, name, effectiveDate);
 }
 
+function adoptAcrossMasters(
+  masters: PriceMasterItem[],
+  masterTypes: MasterType[],
+  name: string,
+  effectiveDate: string,
+): PriceMasterItem | null {
+  for (const masterType of masterTypes) {
+    const matched = adoptMaster(masters, masterType, name, effectiveDate);
+    if (matched) return matched;
+  }
+  return null;
+}
+
 function nearestThicknessMaster(
   masters: PriceMasterItem[],
   masterType: MasterType,
@@ -1003,6 +1016,174 @@ function calculateDemolition(block: EstimateBlock, options?: CalculationOptions)
   }), block, context), block, context);
 }
 
+function calculateCountStructure(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const primaryUnit = (block.countUnit || '箇所').trim() || '箇所';
+  const quantity = Math.max(0, Math.round(block.countQuantity || 0));
+  const matchedMaster = adoptAcrossMasters(
+    context.masters,
+    ['secondary_product', 'misc'],
+    block.secondaryProduct,
+    context.effectiveDate,
+  );
+  const unitPrice = matchedMaster?.unitPrice ?? Math.max(0, block.customUnitPrice || 0);
+  const amount = Math.round(quantity * unitPrice);
+  const displayName = block.secondaryProduct || '街渠桝・接続桝工';
+  const result = emptyResult('count_structure', displayName, primaryUnit);
+
+  const lineItems = [
+    createLineItem({
+      key: 'count-structure.install',
+      section: '構造物工',
+      itemName: displayName,
+      specification: `${primaryUnit} root / count 監査`,
+      quantity,
+      unit: primaryUnit,
+      unitPrice,
+      amount,
+      remarks: '街渠桝・接続桝・側溝桝などの count 系数量',
+    }),
+  ].filter((item) => item.quantity > 0 || item.amount > 0);
+
+  const priceEvidence = [
+    createMasterEvidence('count-structure.install', displayName, matchedMaster, {
+      masterType: 'input',
+      masterName: matchedMaster?.name ?? '数量単価（画面入力）',
+      adoptedUnitPrice: unitPrice,
+      unit: primaryUnit,
+      reason: 'count 系構造物の数量単価',
+      requiresReview: !matchedMaster && unitPrice <= 0,
+    }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    displayName,
+    productCount: quantity,
+    materialTotalCost: amount,
+    primaryQuantity: quantity,
+    primaryUnit,
+    detailSections: [
+      {
+        id: 'count-structure-overview',
+        title: 'count 系数量',
+        tone: 'bg-slate-700',
+        metrics: [
+          metric('数量対象', quantity, primaryUnit),
+          metric('数量単価', unitPrice, `円/${primaryUnit}`, 'currency'),
+          metric('小計', amount, '円', 'currency'),
+        ],
+      },
+      {
+        id: 'count-structure-audit',
+        title: '監査ロジック',
+        tone: 'bg-cyan-600',
+        metrics: [
+          metric('主数量', quantity, primaryUnit),
+          metric('延長換算', 0, 'm'),
+          metric('面積換算', 0, 'm2'),
+        ],
+      },
+    ],
+    lineItems,
+    priceEvidence,
+  }), block, context), block, context);
+}
+
+function calculateMaterialTakeoff(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const mode = block.materialTakeoffMode;
+  const displayName = block.secondaryProduct || '材料数量監査';
+  const result = emptyResult('material_takeoff', displayName, mode);
+  const area = Math.max(0, block.materialArea || 0);
+  const thickness = Math.max(0, block.materialThickness || 0);
+  const factor = block.materialVolumeFactor > 0 ? block.materialVolumeFactor : 1;
+  const density = Math.max(0, block.materialDensity || 0);
+  const directQuantity = Math.max(0, block.materialDirectQuantity || 0);
+  const rawVolume = area > 0 && thickness > 0 ? area * thickness : 0;
+  const adjustedVolume = rawVolume * factor;
+  const theoreticalTonnage = adjustedVolume * density;
+  const primaryQuantity = directQuantity > 0
+    ? directQuantity
+    : mode === 't'
+      ? theoreticalTonnage
+      : adjustedVolume;
+
+  const matchedMaster = adoptAcrossMasters(
+    context.masters,
+    ['crushed_stone', 'road', 'misc'],
+    block.secondaryProduct,
+    context.effectiveDate,
+  );
+  const unitPrice = matchedMaster?.unitPrice ?? Math.max(0, block.customUnitPrice || 0);
+  const amount = Math.round(primaryQuantity * unitPrice);
+
+  const lineItems = [
+    createLineItem({
+      key: 'material-takeoff.quantity',
+      section: '材料数量監査',
+      itemName: displayName,
+      specification: directQuantity > 0
+        ? `直接数量 ${directQuantity}${mode}`
+        : `面積${round2(area)}m2 × 厚み${round2(thickness)}m × 係数${round2(factor)}${mode === 't' ? ` × 密度${round2(density)}t/m3` : ''}`,
+      quantity: primaryQuantity,
+      unit: mode,
+      unitPrice,
+      amount,
+      remarks: mode === 't' ? 't 監査 root。密度を使って換算。' : 'm3 監査 root。面積×厚みまたは直接数量を採用。',
+    }),
+  ].filter((item) => item.quantity > 0 || item.amount > 0);
+
+  const priceEvidence = [
+    createMasterEvidence('material-takeoff.quantity', displayName, matchedMaster, {
+      masterType: 'input',
+      masterName: matchedMaster?.name ?? '数量単価（画面入力）',
+      adoptedUnitPrice: unitPrice,
+      unit: mode,
+      reason: '材料数量監査の単価',
+      requiresReview: !matchedMaster && unitPrice <= 0,
+    }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    displayName,
+    crushedStoneVolume: round2(adjustedVolume),
+    soilRemovalVolume: mode === 't' ? round2(theoreticalTonnage) : 0,
+    materialTotalCost: amount,
+    primaryQuantity: round2(primaryQuantity),
+    primaryUnit: mode,
+    detailSections: [
+      {
+        id: 'material-takeoff-overview',
+        title: '材料数量',
+        tone: 'bg-slate-700',
+        metrics: [
+          metric('監査数量', primaryQuantity, mode),
+          metric('直接数量', directQuantity, mode),
+          metric('数量単価', unitPrice, `円/${mode}`, 'currency'),
+          metric('小計', amount, '円', 'currency'),
+        ],
+      },
+      {
+        id: 'material-takeoff-formula',
+        title: '計算式',
+        tone: 'bg-emerald-600',
+        metrics: [
+          metric('面積', area, 'm2'),
+          metric('厚み', thickness, 'm'),
+          metric('体積係数', factor, '倍'),
+          metric('補正後体積', adjustedVolume, 'm3'),
+          metric('換算密度', density, 't/m3'),
+          metric('理論重量', theoreticalTonnage, 't'),
+        ],
+      },
+    ],
+    lineItems,
+    priceEvidence,
+  }), block, context), block, context);
+}
+
 export function calculate(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
   switch (block.blockType) {
     case 'retaining_wall':
@@ -1011,6 +1192,10 @@ export function calculate(block: EstimateBlock, options?: CalculationOptions): C
       return calculatePavement(block, options);
     case 'demolition':
       return calculateDemolition(block, options);
+    case 'count_structure':
+      return calculateCountStructure(block, options);
+    case 'material_takeoff':
+      return calculateMaterialTakeoff(block, options);
     case 'secondary_product':
     default:
       return calculateSecondaryProduct(block, options);

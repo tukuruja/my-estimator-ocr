@@ -174,6 +174,38 @@ function buildRequiredFieldIssues(block: EstimateBlock): ReviewIssue[] {
         issues.push(createReviewIssue({ severity: 'critical', title: '撤去数量未設定', detail: '延長・幅・厚のいずれかが不足しています。', fieldName: 'demolitionWidth' }));
       }
       break;
+    case 'count_structure':
+      if (!block.secondaryProduct) {
+        issues.push(createReviewIssue({ severity: 'critical', title: '数量対象名未設定', detail: '街渠桝・接続桝などの名称が未設定です。', fieldName: 'secondaryProduct' }));
+      }
+      if (block.countQuantity <= 0) {
+        issues.push(createReviewIssue({ severity: 'critical', title: 'count 数量未設定', detail: '箇所・基・本などの主数量が未設定です。', fieldName: 'countQuantity' }));
+      }
+      if (!block.countUnit.trim()) {
+        issues.push(createReviewIssue({ severity: 'warning', title: 'count 単位未設定', detail: '箇所・基・本などの数量単位が空です。', fieldName: 'countUnit' }));
+      }
+      break;
+    case 'material_takeoff':
+      if (!block.secondaryProduct) {
+        issues.push(createReviewIssue({ severity: 'critical', title: '材料名未設定', detail: '材料層または地盤改良名が未設定です。', fieldName: 'secondaryProduct' }));
+      }
+      if (block.materialDirectQuantity <= 0 && (block.materialArea <= 0 || block.materialThickness <= 0)) {
+        issues.push(createReviewIssue({
+          severity: 'critical',
+          title: '材料数量 root 未設定',
+          detail: '直接数量、または 面積×厚み のどちらかが必要です。',
+          fieldName: 'materialDirectQuantity',
+        }));
+      }
+      if (block.materialTakeoffMode === 't' && block.materialDirectQuantity <= 0 && block.materialDensity <= 0) {
+        issues.push(createReviewIssue({
+          severity: 'critical',
+          title: 't 監査の換算密度未設定',
+          detail: 't 監査で直接数量が無い場合は、t/m3 の換算密度が必要です。',
+          fieldName: 'materialDensity',
+        }));
+      }
+      break;
     default:
       break;
   }
