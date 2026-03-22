@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import fitz
 import numpy as np
@@ -32,6 +32,10 @@ PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 JOB_DIR.mkdir(parents=True, exist_ok=True)
 PRODUCT_MASTER_SOURCE = BASE_DIR.parent / "client" / "src" / "lib" / "priceData.ts"
 OCR_REVIEW_SCORE_THRESHOLD = 0.75
+MAX_IMAGE_UPLOAD_BYTES = 30 * 1024 * 1024
+MAX_PDF_UPLOAD_BYTES = 150 * 1024 * 1024
+MAX_PDF_PAGE_COUNT = 240
+PDF_SPLIT_PAGE_COUNT = 20
 
 
 PACK_DIR_CANDIDATES = [
@@ -429,20 +433,26 @@ def extract_pdf_text_items(file_bytes: bytes) -> list[dict[str, Any]]:
     document = fitz.open(stream=file_bytes, filetype="pdf")
     items: list[dict[str, Any]] = []
     for page_index, page in enumerate(document, start=1):
-        words = page.get_text("words")
-        for word in words:
-            if len(word) < 5:
-                continue
-            x0, y0, x1, y1, text, *_rest = word
-            text = str(text).strip()
-            if not text:
-                continue
-            items.append({
-                "text": text,
-                "score": 0.99,
-                "box": page_box_to_flat(x0, y0, x1, y1),
-                "page": page_index,
-            })
+        items.extend(extract_pdf_text_items_from_page(page, page_index))
+    return items
+
+
+def extract_pdf_text_items_from_page(page: fitz.Page, page_index: int) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    words = page.get_text("words")
+    for word in words:
+        if len(word) < 5:
+            continue
+        x0, y0, x1, y1, text, *_rest = word
+        text = str(text).strip()
+        if not text:
+            continue
+        items.append({
+            "text": text,
+            "score": 0.99,
+            "box": page_box_to_flat(x0, y0, x1, y1),
+            "page": page_index,
+        })
     return items
 
 
@@ -532,9 +542,22 @@ def render_pdf_pages(file_bytes: bytes) -> list[Image.Image]:
     document = fitz.open(stream=file_bytes, filetype="pdf")
     pages: list[Image.Image] = []
     for page in document:
-        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-        pages.append(Image.open(io.BytesIO(pixmap.tobytes("png"))).convert("RGB"))
+        pages.append(render_pdf_page(page))
     return pages
+
+
+def render_pdf_page(page: fitz.Page) -> Image.Image:
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+    return Image.open(io.BytesIO(pixmap.tobytes("png"))).convert("RGB")
+
+
+def build_pdf_page_chunks(page_count: int, chunk_size: int = PDF_SPLIT_PAGE_COUNT) -> list[tuple[int, int]]:
+    if page_count <= 0:
+        return []
+    return [
+        (start, min(start + chunk_size, page_count))
+        for start in range(0, page_count, chunk_size)
+    ]
 
 
 def extract_pdf_page_sizes_mm(file_bytes: bytes) -> list[dict[str, float]]:
@@ -622,10 +645,27 @@ def validate_upload(file_name: str | None, file_bytes: bytes, content_type: str 
         raise HTTPException(status_code=400, detail="ファイル名がありません")
     if not file_bytes:
         raise HTTPException(status_code=400, detail="空ファイルは解析できません")
-    if len(file_bytes) > 30 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="ファイルサイズが上限を超えています")
-
     file_type = "pdf" if content_type == "application/pdf" or file_name.lower().endswith(".pdf") else "image"
+    if file_type == "pdf":
+        if len(file_bytes) > MAX_PDF_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"PDF ファイルサイズが上限を超えています。{MAX_PDF_UPLOAD_BYTES // (1024 * 1024)}MB 以下にしてください",
+            )
+        try:
+            document = fitz.open(stream=file_bytes, filetype="pdf")
+            page_count = len(document)
+            document.close()
+        except Exception as exc:  # pragma: no cover - invalid pdf
+            raise HTTPException(status_code=422, detail=f"PDF の読み込みに失敗しました: {exc}") from exc
+        if page_count > MAX_PDF_PAGE_COUNT:
+            raise HTTPException(
+                status_code=413,
+                detail=f"PDF ページ数が上限を超えています。{MAX_PDF_PAGE_COUNT}ページ以下にしてください",
+            )
+    elif len(file_bytes) > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="画像ファイルサイズが上限を超えています")
+
     if file_type not in {"pdf", "image"}:
         raise HTTPException(status_code=400, detail="対応していないファイル形式です")
     return file_type
@@ -1913,37 +1953,62 @@ def process_drawing_payload(
     file_bytes: bytes,
     mode: str,
     learning_context: dict[str, Any] | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    try:
-        pages = render_pdf_pages(file_bytes) if file_type == "pdf" else load_image_pages(file_bytes)
-        page_sizes_mm = extract_pdf_page_sizes_mm(file_bytes) if file_type == "pdf" else [
-            {"physicalWidthMm": None, "physicalHeightMm": None}
-            for _ in pages
-        ]
-    except Exception as exc:  # pragma: no cover - depends on user input
-        raise HTTPException(status_code=422, detail=f"図面の読み込みに失敗しました: {exc}") from exc
-
-    media_route = determine_media_route(file_name, file_type, file_bytes, pages)
     all_ocr_items: list[dict[str, Any]] = []
     page_previews: list[dict[str, Any]] = []
 
-    for index, page_image in enumerate(pages, start=1):
-        preview_file_name = save_preview_image(page_image)
-        page_size = page_sizes_mm[index - 1] if index - 1 < len(page_sizes_mm) else {"physicalWidthMm": None, "physicalHeightMm": None}
-        page_previews.append({
-            "imageUrl": build_image_url_from_base(base_url, f"previews/{preview_file_name}"),
-            "width": page_image.width,
-            "height": page_image.height,
-            "page": index,
-            "physicalWidthMm": page_size.get("physicalWidthMm"),
-            "physicalHeightMm": page_size.get("physicalHeightMm"),
-        })
-
-    if file_type == "pdf" and media_route["preferredPipeline"] == "direct_text":
-        all_ocr_items = extract_pdf_text_items(file_bytes)
-    else:
-        for index, page_image in enumerate(pages, start=1):
-            all_ocr_items.extend(run_ocr_on_page(page_image, index))
+    try:
+        if file_type == "pdf":
+            document = fitz.open(stream=file_bytes, filetype="pdf")
+            page_count = len(document)
+            sample_pages = [
+                render_pdf_page(document.load_page(index))
+                for index in range(min(page_count, 2))
+            ]
+            media_route = determine_media_route(file_name, file_type, file_bytes, sample_pages)
+            page_chunks = build_pdf_page_chunks(page_count)
+            if len(page_chunks) > 1:
+                media_route["sheetSplitRequired"] = True
+            for chunk_index, (start, end) in enumerate(page_chunks, start=1):
+                if progress_callback:
+                    progress_callback(
+                        f"OCR解析中です。PDF を {len(page_chunks)} 分割で処理しています "
+                        f"({chunk_index}/{len(page_chunks)}: {start + 1}-{end} ページ)"
+                    )
+                for page_index in range(start, end):
+                    page = document.load_page(page_index)
+                    page_image = render_pdf_page(page)
+                    preview_file_name = save_preview_image(page_image)
+                    page_previews.append({
+                        "imageUrl": build_image_url_from_base(base_url, f"previews/{preview_file_name}"),
+                        "width": page_image.width,
+                        "height": page_image.height,
+                        "page": page_index + 1,
+                        "physicalWidthMm": round(float(page.rect.width) * 25.4 / 72.0, 2),
+                        "physicalHeightMm": round(float(page.rect.height) * 25.4 / 72.0, 2),
+                    })
+                    if media_route["preferredPipeline"] == "direct_text":
+                        all_ocr_items.extend(extract_pdf_text_items_from_page(page, page_index + 1))
+                    else:
+                        all_ocr_items.extend(run_ocr_on_page(page_image, page_index + 1))
+            document.close()
+        else:
+            pages = load_image_pages(file_bytes)
+            media_route = determine_media_route(file_name, file_type, file_bytes, pages)
+            for index, page_image in enumerate(pages, start=1):
+                preview_file_name = save_preview_image(page_image)
+                page_previews.append({
+                    "imageUrl": build_image_url_from_base(base_url, f"previews/{preview_file_name}"),
+                    "width": page_image.width,
+                    "height": page_image.height,
+                    "page": index,
+                    "physicalWidthMm": None,
+                    "physicalHeightMm": None,
+                })
+                all_ocr_items.extend(run_ocr_on_page(page_image, index))
+    except Exception as exc:  # pragma: no cover - depends on user input
+        raise HTTPException(status_code=422, detail=f"図面の読み込みに失敗しました: {exc}") from exc
 
     titleblock_meta = extract_titleblock_meta(all_ocr_items, page_previews[0] if page_previews else None)
     business_document = detect_business_document(titleblock_meta, all_ocr_items)
@@ -1984,7 +2049,7 @@ def process_drawing_payload(
         "drawingSource": {
             "fileName": file_name,
             "fileType": file_type,
-            "pageCount": len(pages),
+            "pageCount": len(page_previews),
         },
         "mediaRoute": media_route,
         "titleBlock": titleblock_meta,
@@ -2008,6 +2073,7 @@ def process_drawing_payload(
             "knowledge_count": len(KNOWLEDGE_MASTER),
             "symbol_seed_count": len(SYMBOL_SEED_MASTER),
             "business_document": business_document,
+            "chunkCount": len(build_pdf_page_chunks(len(page_previews))) if file_type == "pdf" else 1,
         },
     }
 
@@ -2019,6 +2085,13 @@ def run_ocr_job(job_id: str, input_path: str, file_name: str, file_type: str, mo
     state["updatedAt"] = utc_now_iso()
     write_job_state(job_id, state)
 
+    def update_progress(message: str) -> None:
+        latest = read_job_state(job_id)
+        latest["status"] = "processing"
+        latest["progressMessage"] = message
+        latest["updatedAt"] = utc_now_iso()
+        write_job_state(job_id, latest)
+
     try:
         file_bytes = Path(input_path).read_bytes()
         result = process_drawing_payload(
@@ -2028,6 +2101,7 @@ def run_ocr_job(job_id: str, input_path: str, file_name: str, file_type: str, mo
             file_bytes=file_bytes,
             mode=mode,
             learning_context=learning_context,
+            progress_callback=update_progress,
         )
         state["status"] = "completed"
         state["progressMessage"] = "OCR解析が完了しました。"

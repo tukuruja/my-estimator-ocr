@@ -35,6 +35,7 @@ type WorkbookAuditReferenceRow = {
 };
 
 const SHIROYAMA_KEYWORDS = ['城山', '都井沢', 'クリエイト'];
+const SHINMORI_KEYWORDS = ['新産業の森', '藤沢市', '地区画道路', '造成工事その２'];
 
 const SHIROYAMA_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
   {
@@ -184,6 +185,173 @@ const SHIROYAMA_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
   },
 ];
 
+const SHINMORI_WORKBOOK_ROWS: WorkbookAuditReferenceRow[] = [
+  {
+    id: 'shinmori-combo-l',
+    section: '路面排水工',
+    itemName: '組合せＬ型側溝Ｃ 一般部（両Ｒ）',
+    specification: '１次見積もり!3 / 数量 559m',
+    quantity: 559,
+    unit: 'm',
+    workbookLogic: '真の数量表は １次見積もり。側溝は延長 m を主数量にする。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['組合せ', '側溝'] },
+  },
+  {
+    id: 'shinmori-l300-general',
+    section: '路面排水工',
+    itemName: 'Ｌ形側溝（300B）一般部',
+    specification: '１次見積もり!7 / 数量 566m',
+    quantity: 566,
+    unit: 'm',
+    workbookLogic: 'L形側溝一般部は延長 root。W/H や付属材料は別管理。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['L形側溝', '一般部'] },
+  },
+  {
+    id: 'shinmori-l300-flat',
+    section: '路面排水工',
+    itemName: 'Ｌ形側溝（300B）平坦部',
+    specification: '１次見積もり!8 / 数量 12m',
+    quantity: 12,
+    unit: 'm',
+    workbookLogic: '平坦部も延長 root。乗入部・一般部と別行で保持する。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['L形側溝', '平坦部'] },
+  },
+  {
+    id: 'shinmori-l300-entrance',
+    section: '路面排水工',
+    itemName: 'Ｌ形側溝（300B）乗入部',
+    specification: '１次見積もり!9 / 数量 24m',
+    quantity: 24,
+    unit: 'm',
+    workbookLogic: '乗入部は別延長として持ち、一般部と混算しない。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['L形側溝', '乗入部'] },
+  },
+  {
+    id: 'shinmori-trench-1',
+    section: '排水工',
+    itemName: '浸透ﾄﾚﾝﾁ φ250-1段',
+    specification: '１次見積もり!11 / 数量 359m',
+    quantity: 359,
+    unit: 'm',
+    workbookLogic: '浸透トレンチは段数を属性、延長を主数量とする。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['浸透', 'ﾄﾚﾝﾁ', '1段'] },
+  },
+  {
+    id: 'shinmori-trench-2',
+    section: '排水工',
+    itemName: '浸透ﾄﾚﾝﾁ φ250-2段',
+    specification: '１次見積もり!12 / 数量 714m',
+    quantity: 714,
+    unit: 'm',
+    workbookLogic: '2段トレンチも延長 root。段数は数量ではなく仕様条件。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['浸透', 'ﾄﾚﾝﾁ', '2段'] },
+  },
+  {
+    id: 'shinmori-curb-a',
+    section: '境界工',
+    itemName: '歩車道境界ﾌﾞﾛｯｸ 一般部Ａ（両Ｒ）',
+    specification: '１次見積もり!20 / 数量 40m',
+    quantity: 40,
+    unit: 'm',
+    workbookLogic: '歩車道境界ブロックは延長 m を主数量とする。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['歩車道', '境界', '一般部'] },
+  },
+  {
+    id: 'shinmori-curb-flat',
+    section: '境界工',
+    itemName: '歩車道境界ﾌﾞﾛｯｸ 平坦部（ｾｲﾌﾃｨﾌﾞﾛｯｸ）',
+    specification: '１次見積もり!21 / 数量 2m',
+    quantity: 2,
+    unit: 'm',
+    workbookLogic: '平坦部は別延長で保持する。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['歩車道', '境界', '平坦部'] },
+  },
+  {
+    id: 'shinmori-curb-slope',
+    section: '境界工',
+    itemName: '歩車道境界ﾌﾞﾛｯｸ 摺付部Ｃ（乗入用斜1本）',
+    specification: '１次見積もり!22 / 数量 4m',
+    quantity: 4,
+    unit: 'm',
+    workbookLogic: '摺付部は別延長として監査する。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['歩車道', '境界', '摺付部'] },
+  },
+  {
+    id: 'shinmori-site-boundary',
+    section: '境界工',
+    itemName: '地先境界ﾌﾞﾛｯｸ Ｂ（W=9.5m）',
+    specification: '１次見積もり!23 / 数量 681m',
+    quantity: 681,
+    unit: 'm',
+    workbookLogic: '地先境界ブロックは W=9.5m を断面条件とし、数量本体は 681m。',
+    blockType: 'secondary_product',
+    matcher: { secondaryProductIncludes: ['地先', '境界', 'ﾌﾞﾛｯｸ'] },
+  },
+  {
+    id: 'shinmori-manhole-a',
+    section: '排水工',
+    itemName: '街渠桝Ａ 一般部（ｾﾐﾌﾗｯﾄ）',
+    specification: '１次見積もり!13 / 数量 38箇所',
+    quantity: 38,
+    unit: '箇所',
+    workbookLogic: '桝は count root。現行 block は延長系なので別モデルが必要。',
+  },
+  {
+    id: 'shinmori-connection-a',
+    section: '排水工',
+    itemName: '接続桝Ａ 一般部（ｾﾐﾌﾗｯﾄ）',
+    specification: '１次見積もり!14 / 数量 2箇所',
+    quantity: 2,
+    unit: '箇所',
+    workbookLogic: '接続桝は count root。現行 block では直接比較しない。',
+  },
+  {
+    id: 'shinmori-lmanhole-general',
+    section: '排水工',
+    itemName: 'Ｌ形側溝桝 一般部 藤沢市Ｂ型',
+    specification: '１次見積もり!15 / 数量 32箇所',
+    quantity: 32,
+    unit: '箇所',
+    workbookLogic: 'L形側溝桝は count root。延長系 block とは分けて監査する。',
+  },
+  {
+    id: 'shinmori-roadbed-rc40',
+    section: '舗装工',
+    itemName: '車道アスファルト舗装工 下層路盤 RC-40 t=15cm',
+    specification: '１次見積もり!32 / 材料数量 663.13',
+    quantity: 663.13,
+    unit: 'm3',
+    workbookLogic: 'この行は面積 root ではなく材料数量。面積×厚みが未確定だと一致監査できない。',
+  },
+  {
+    id: 'shinmori-rm40-15',
+    section: '舗装工',
+    itemName: '再生粒度調整砕石 RM-40 t=15cm',
+    specification: '１次見積もり!34 / 材料数量 656',
+    quantity: 656,
+    unit: 'm3',
+    workbookLogic: '材料層の数量。舗装面積 root と分けて扱う必要がある。',
+  },
+  {
+    id: 'shinmori-ground-improvement',
+    section: '路床工',
+    itemName: '地盤改良 置き換え工 t=850',
+    specification: '１次見積もり!25 / RC40 3,283t',
+    quantity: 3283,
+    unit: 't',
+    workbookLogic: '置換工は tonnage root。現行アプリは ton 直算モデルを持たない。',
+  },
+];
+
 function includesAllTokens(source: string, tokens: string[]): boolean {
   const normalized = source.normalize('NFKC').toUpperCase();
   return tokens.every((token) => normalized.includes(token.normalize('NFKC').toUpperCase()));
@@ -205,6 +373,16 @@ function isShiroyamaProject(project: Project): boolean {
     ...project.drawings.map((drawing) => `${drawing.name} ${drawing.fileName} ${drawing.drawingTitle}`),
   ].join(' ');
   return SHIROYAMA_KEYWORDS.some((keyword) => text.includes(keyword));
+}
+
+function isShinmoriProject(project: Project): boolean {
+  const text = [
+    project.name,
+    project.siteName,
+    project.clientName,
+    ...project.drawings.map((drawing) => `${drawing.name} ${drawing.fileName} ${drawing.drawingTitle}`),
+  ].join(' ');
+  return SHINMORI_KEYWORDS.some((keyword) => text.includes(keyword));
 }
 
 function describeAppLogic(block: EstimateBlock, result: CalculationResult): string {
@@ -281,13 +459,21 @@ function buildUnsupportedRow(reference: WorkbookAuditReferenceRow, note: string)
   };
 }
 
-export function buildProjectWorkbookAudit(project: Project, blockResults: ProjectBlockResult[]): WorkbookAuditBundle | null {
-  if (!isShiroyamaProject(project)) return null;
-
+function buildWorkbookAuditBundle({
+  projectLabel,
+  sourceWorkbook,
+  referenceRows,
+  blockResults,
+}: {
+  projectLabel: string;
+  sourceWorkbook: string;
+  referenceRows: WorkbookAuditReferenceRow[];
+  blockResults: ProjectBlockResult[];
+}): WorkbookAuditBundle {
   const usedBlockIds = new Set<string>();
-  const rows = SHIROYAMA_WORKBOOK_ROWS.map((reference) => {
+  const rows = referenceRows.map((reference) => {
     if (!reference.blockType) {
-      return buildUnsupportedRow(reference, '浸透貯留槽や差し引き体積は現行 block モデル外のため、式だけ監査対象に残しています。');
+      return buildUnsupportedRow(reference, '現行アプリの block モデルでは、この数量 root を直接算定しません。');
     }
 
     const matched = blockResults.find(({ block }) => (
@@ -307,8 +493,8 @@ export function buildProjectWorkbookAudit(project: Project, blockResults: Projec
         difference: null,
         status: 'missing_block' as WorkbookAuditStatus,
         workbookLogic: reference.workbookLogic,
-        appLogic: '一致する block が未作成、または断面条件が未入力です。',
-        notes: ['該当 block を作成し、W/H/t/名称を workbook 条件へ合わせる必要があります。'],
+        appLogic: '一致する block が未作成、または名称/断面条件が未入力です。',
+        notes: ['該当 block を作成し、名称と数量 root を workbook 条件へ合わせる必要があります。'],
       };
     }
 
@@ -338,8 +524,8 @@ export function buildProjectWorkbookAudit(project: Project, blockResults: Projec
   });
 
   return {
-    projectLabel: '城山都井沢 外構造成見積監査',
-    sourceWorkbook: '●外構内訳書（城山都井沢）.xlsm',
+    projectLabel,
+    sourceWorkbook,
     rows,
     summary: {
       totalRows: rows.length,
@@ -349,4 +535,26 @@ export function buildProjectWorkbookAudit(project: Project, blockResults: Projec
       unsupportedRows: rows.filter((row) => row.status === 'unsupported_logic').length,
     },
   };
+}
+
+export function buildProjectWorkbookAudit(project: Project, blockResults: ProjectBlockResult[]): WorkbookAuditBundle | null {
+  if (isShiroyamaProject(project)) {
+    return buildWorkbookAuditBundle({
+      projectLabel: '城山都井沢 外構造成見積監査',
+      sourceWorkbook: '●外構内訳書（城山都井沢）.xlsm',
+      referenceRows: SHIROYAMA_WORKBOOK_ROWS,
+      blockResults,
+    });
+  }
+
+  if (isShinmoriProject(project)) {
+    return buildWorkbookAuditBundle({
+      projectLabel: '新産業の森 その2工事 数量監査',
+      sourceWorkbook: '藤沢市新産業の森第二地区土地区画整理事業 造成工事（その２）設計書.xlsm / １次見積もり',
+      referenceRows: SHINMORI_WORKBOOK_ROWS,
+      blockResults,
+    });
+  }
+
+  return null;
 }

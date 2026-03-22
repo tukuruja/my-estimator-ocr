@@ -23,7 +23,7 @@ import { getWorkspaceHeaders } from './workspace';
 const FALLBACK_API_BASE_URL = 'http://127.0.0.1:8000';
 const LOCAL_APP_URL = 'http://localhost:3000';
 const OCR_JOB_POLL_INTERVAL_MS = 1500;
-const OCR_JOB_TIMEOUT_MS = 5 * 60 * 1000;
+const OCR_JOB_TIMEOUT_MS = 20 * 60 * 1000;
 
 export interface OcrParseJobState {
   jobId: string;

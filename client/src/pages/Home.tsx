@@ -62,6 +62,7 @@ import { getWorkTypeLabel } from '@/lib/workTypes';
 import { buildProjectWorkbookAudit } from '@/lib/workbookAudit';
 import type { EstimationLogicRunResponse } from '@shared/estimationLogic';
 import { getShiroyamaLogicForBlockType, SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC } from '@shared/shiroyamaExteriorEstimateLogic';
+import { getShinmoriLogicForBlockType, SHINMORI_DISTRICT_ROAD_ESTIMATE_LOGIC } from '@shared/shinmoriDistrictRoadEstimateLogic';
 import { toast } from 'sonner';
 
 const CANDIDATE_LABELS: Record<string, string> = {
@@ -233,13 +234,41 @@ function EstimationLogicCard({ run, loading, error }: { run: EstimationLogicRunR
   );
 }
 
-function WorkbookLogicCard({ blockType }: { blockType: BlockType }) {
-  const rules = getShiroyamaLogicForBlockType(blockType);
+function isShiroyamaProjectLike(project: Project | null): boolean {
+  if (!project) return false;
+  const text = [
+    project.name,
+    project.clientName,
+    project.siteName,
+    ...project.drawings.map((drawing) => `${drawing.fileName} ${drawing.name} ${drawing.drawingTitle}`),
+  ].join(' ');
+  return ['城山', '都井沢', 'クリエイト'].some((keyword) => text.includes(keyword));
+}
+
+function isShinmoriProjectLike(project: Project | null): boolean {
+  if (!project) return false;
+  const text = [
+    project.name,
+    project.clientName,
+    project.siteName,
+    ...project.drawings.map((drawing) => `${drawing.fileName} ${drawing.name} ${drawing.drawingTitle}`),
+  ].join(' ');
+  return ['新産業の森', '藤沢市', '地区画道路', '造成工事その２'].some((keyword) => text.includes(keyword));
+}
+
+function WorkbookLogicCard({ project, blockType }: { project: Project | null; blockType: BlockType }) {
+  const logicProfile = isShinmoriProjectLike(project)
+    ? SHINMORI_DISTRICT_ROAD_ESTIMATE_LOGIC
+    : SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC;
+  const rules = isShinmoriProjectLike(project)
+    ? getShinmoriLogicForBlockType(blockType)
+    : getShiroyamaLogicForBlockType(blockType);
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
       <div className="text-sm font-semibold text-slate-800">今回の内訳一致ロジック</div>
       <div className="mt-1 text-[11px] leading-5 text-slate-500">
-        {SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC.projectLabel} の内訳書と図面から整理した数量解釈です。
+        {logicProfile.projectLabel} の内訳書と図面から整理した数量解釈です。
       </div>
       <div className="mt-3 space-y-3">
         {rules.map((rule) => (
@@ -2181,7 +2210,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
 
             <CalculationResults result={result} block={activeBlock} />
             <EstimationLogicCard run={logicRun} loading={isLogicRunning} error={logicRunError} />
-            <WorkbookLogicCard blockType={activeBlock.blockType} />
+            <WorkbookLogicCard project={activeProject} blockType={activeBlock.blockType} />
             {reportError && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
                 {reportError}
