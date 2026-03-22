@@ -979,6 +979,25 @@ def build_learning_link_index(learning_context: dict[str, Any] | None) -> dict[s
     return indexed
 
 
+def find_page_anchor_item(
+    ocr_items: list[dict[str, Any]],
+    page_no: int,
+    preferred_terms: list[str] | None = None,
+) -> dict[str, Any] | None:
+    page_items = [item for item in ocr_items if int(item["page"]) == page_no]
+    if not page_items:
+        return None
+
+    normalized_terms = [normalize_role_text(term) for term in (preferred_terms or []) if isinstance(term, str) and term.strip()]
+    if normalized_terms:
+        for item in sorted(page_items, key=lambda entry: entry["score"], reverse=True):
+            normalized_text = normalize_role_text(str(item["text"]))
+            if any(term and term in normalized_text for term in normalized_terms):
+                return item
+
+    return max(page_items, key=lambda entry: entry["score"])
+
+
 def infer_plan_section_links(
     ocr_items: list[dict[str, Any]],
     page_roles: list[dict[str, Any]],
@@ -1009,6 +1028,33 @@ def infer_plan_section_links(
             "box": item["box"],
             "confidence": item["score"],
         })
+
+    for page_role in page_roles:
+        page_no = int(page_role["pageNo"])
+        for role_entry in page_role.get("roles", []):
+            role_name = str(role_entry.get("role") or "")
+            for keyword in role_entry.get("keywords", []):
+                callout = extract_callout_key(str(keyword))
+                if not callout:
+                    continue
+                anchor_item = find_page_anchor_item(ocr_items, page_no, [str(keyword), callout, role_name])
+                if not anchor_item:
+                    continue
+                existing_entries = callout_candidates.setdefault(callout, [])
+                existing_key = {
+                    (entry["pageNo"], entry["role"], tuple(entry["box"]))
+                    for entry in existing_entries
+                }
+                candidate_key = (page_no, role_name, tuple(anchor_item["box"]))
+                if candidate_key in existing_key:
+                    continue
+                existing_entries.append({
+                    "pageNo": page_no,
+                    "role": role_name,
+                    "text": str(keyword),
+                    "box": anchor_item["box"],
+                    "confidence": min(0.88, float(anchor_item["score"]) + 0.08),
+                })
 
     links: list[dict[str, Any]] = []
     for callout, entries in callout_candidates.items():
@@ -1058,6 +1104,47 @@ def infer_plan_section_links(
                     "confidence": confidence,
                     "reasons": reasons,
                 })
+
+        if links and any(link["callout"] == callout for link in links):
+            continue
+
+        learned_entries = learning_index.get(callout, [])
+        for learned_entry in learned_entries:
+            source_page_no = int(learned_entry.get("sourcePageNo") or 0)
+            target_page_no = int(learned_entry.get("targetPageNo") or 0)
+            source_role = str(learned_entry.get("sourceRole") or "plan")
+            target_role = str(learned_entry.get("targetRole") or "section")
+            source_anchor = find_page_anchor_item(
+                ocr_items,
+                source_page_no,
+                [str(learned_entry.get("sourceText") or ""), callout, source_role, "配置", "平面"],
+            )
+            target_anchor = find_page_anchor_item(
+                ocr_items,
+                target_page_no,
+                [str(learned_entry.get("targetText") or ""), callout, target_role, "断面", "詳細"],
+            )
+            if not source_anchor or not target_anchor:
+                continue
+            if source_page_no == target_page_no and source_anchor["box"] == target_anchor["box"]:
+                continue
+            links.append({
+                "id": f"{callout}-{source_page_no}-{target_page_no}-{target_role}-learned",
+                "callout": callout,
+                "sourcePageNo": source_page_no,
+                "sourceRole": source_role,
+                "sourceText": str(learned_entry.get("sourceText") or callout),
+                "sourceBox": source_anchor["box"],
+                "targetPageNo": target_page_no,
+                "targetRole": target_role,
+                "targetText": str(learned_entry.get("targetText") or callout),
+                "targetBox": target_anchor["box"],
+                "confidence": round(min(0.92, 0.48 + min(float(source_anchor["score"]), float(target_anchor["score"])) * 0.22), 4),
+                "reasons": [
+                    f"過去に採用した callout {callout} の図面リンク履歴を再利用",
+                    f"page {source_page_no} -> page {target_page_no} の学習済み参照を補完",
+                ],
+            })
 
     links.sort(key=lambda item: item["confidence"], reverse=True)
     deduped: list[dict[str, Any]] = []
