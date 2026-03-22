@@ -1,4 +1,6 @@
 import type {
+  DrawingDistanceMeasurement,
+  DrawingMeasurementCalibration,
   DrawingMeasurementPoint,
   DrawingPage,
   DrawingPolygonMeasurement,
@@ -16,11 +18,28 @@ function resolvePaperMillimetersPerPixel(page: DrawingPage): number | null {
   return null;
 }
 
-function resolveRealMillimetersPerPixel(page: DrawingPage, resolvedUnits?: DrawingResolvedUnits): number | null {
+function resolveCalibrationMillimetersPerPixel(
+  pageNo: number,
+  calibrations?: DrawingMeasurementCalibration[],
+): number | null {
+  const calibration = calibrations?.find((item) => item.pageNo === pageNo);
+  if (!calibration || !Number.isFinite(calibration.metersPerPixel) || calibration.metersPerPixel <= 0) {
+    return null;
+  }
+  return calibration.metersPerPixel * 1000;
+}
+
+function resolveRealMillimetersPerPixel(
+  page: DrawingPage,
+  resolvedUnits?: DrawingResolvedUnits,
+  calibrations?: DrawingMeasurementCalibration[],
+): number | null {
   const paperMmPerPixel = resolvePaperMillimetersPerPixel(page);
   const sheetScaleRatio = resolvedUnits?.sheetScaleRatio ?? null;
-  if (!paperMmPerPixel || !sheetScaleRatio) return null;
-  return paperMmPerPixel * sheetScaleRatio;
+  if (paperMmPerPixel && sheetScaleRatio) {
+    return paperMmPerPixel * sheetScaleRatio;
+  }
+  return resolveCalibrationMillimetersPerPixel(page.pageNo, calibrations);
 }
 
 export function calculateDistancePixels(
@@ -45,8 +64,9 @@ export function convertDistancePixelsToMeters(
   pixelLength: number,
   page: DrawingPage,
   resolvedUnits?: DrawingResolvedUnits,
+  calibrations?: DrawingMeasurementCalibration[],
 ): number | null {
-  const mmPerPixel = resolveRealMillimetersPerPixel(page, resolvedUnits);
+  const mmPerPixel = resolveRealMillimetersPerPixel(page, resolvedUnits, calibrations);
   if (!mmPerPixel) return null;
   return Number(((pixelLength * mmPerPixel) / 1000).toFixed(4));
 }
@@ -55,8 +75,9 @@ export function convertAreaPixelsToSquareMeters(
   pixelArea: number,
   page: DrawingPage,
   resolvedUnits?: DrawingResolvedUnits,
+  calibrations?: DrawingMeasurementCalibration[],
 ): number | null {
-  const mmPerPixel = resolveRealMillimetersPerPixel(page, resolvedUnits);
+  const mmPerPixel = resolveRealMillimetersPerPixel(page, resolvedUnits, calibrations);
   if (!mmPerPixel) return null;
   const squareMeters = (pixelArea * mmPerPixel * mmPerPixel) / 1_000_000;
   return Number(squareMeters.toFixed(4));
@@ -66,12 +87,13 @@ export function describeDistanceMeasurement(
   pixelLength: number,
   page: DrawingPage,
   resolvedUnits?: DrawingResolvedUnits,
+  calibrations?: DrawingMeasurementCalibration[],
 ): { value: string; note: string } {
-  const meters = convertDistancePixelsToMeters(pixelLength, page, resolvedUnits);
+  const meters = convertDistancePixelsToMeters(pixelLength, page, resolvedUnits, calibrations);
   if (meters !== null) {
     return {
       value: `${meters} m`,
-      note: 'ページ実寸と図面縮尺から換算',
+      note: resolvedUnits?.sheetScaleRatio ? 'ページ実寸と図面縮尺から換算' : '基準寸法から換算',
     };
   }
   return {
@@ -84,12 +106,13 @@ export function describePolygonMeasurement(
   pixelArea: number,
   page: DrawingPage,
   resolvedUnits?: DrawingResolvedUnits,
+  calibrations?: DrawingMeasurementCalibration[],
 ): { value: string; note: string } {
-  const squareMeters = convertAreaPixelsToSquareMeters(pixelArea, page, resolvedUnits);
+  const squareMeters = convertAreaPixelsToSquareMeters(pixelArea, page, resolvedUnits, calibrations);
   if (squareMeters !== null) {
     return {
       value: `${squareMeters} m²`,
-      note: 'ページ実寸と図面縮尺から換算',
+      note: resolvedUnits?.sheetScaleRatio ? 'ページ実寸と図面縮尺から換算' : '基準寸法から換算',
     };
   }
   return {
@@ -104,6 +127,22 @@ export function buildPolygonMeasurementName(count: number): string {
 
 export function buildDistanceMeasurementName(count: number): string {
   return `距離計測 ${count}`;
+}
+
+export function calculateMetersPerPixelFromReference(
+  measurement: DrawingDistanceMeasurement,
+  actualLengthMeters: number,
+): number {
+  if (!Number.isFinite(actualLengthMeters) || actualLengthMeters <= 0) return 0;
+  if (!Number.isFinite(measurement.pixelLength) || measurement.pixelLength <= 0) return 0;
+  return Number((actualLengthMeters / measurement.pixelLength).toFixed(8));
+}
+
+export function findPageCalibration(
+  pageNo: number,
+  calibrations: DrawingMeasurementCalibration[],
+): DrawingMeasurementCalibration | null {
+  return calibrations.find((item) => item.pageNo === pageNo) ?? null;
 }
 
 export function polygonMeasurementToPath(points: DrawingPolygonMeasurement['points'], zoom: number): string {

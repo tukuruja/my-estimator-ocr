@@ -70,6 +70,17 @@ export interface DrawingPolygonMeasurement {
 
 export type DrawingManualMeasurement = DrawingDistanceMeasurement | DrawingPolygonMeasurement;
 
+export interface DrawingMeasurementCalibration {
+  id: string;
+  pageNo: number;
+  measurementId: string;
+  measurementName: string;
+  actualLengthMeters: number;
+  pixelLength: number;
+  metersPerPixel: number;
+  createdAt: string;
+}
+
 export interface AICandidate {
   id: string;
   fieldName: string;
@@ -83,6 +94,7 @@ export interface AICandidate {
   sourceBox: BoundingBox;
   reason: string;
   requiresReview: boolean;
+  candidateOrigin?: 'ocr' | 'manual_measurement' | 'cad_structured';
 }
 
 export interface WorkTypeCandidate {
@@ -484,6 +496,7 @@ export interface Drawing {
   reviewQueue: OcrReviewQueueItem[];
   manualResolutions: DrawingManualResolution[];
   manualMeasurements: DrawingManualMeasurement[];
+  measurementCalibrations: DrawingMeasurementCalibration[];
   uploadedAt: string;
   lastParsedAt?: string;
   lastError?: string;
@@ -863,6 +876,7 @@ export function createDefaultDrawing(projectId: string, name: string = '図面�
     reviewQueue: [],
     manualResolutions: [],
     manualMeasurements: [],
+    measurementCalibrations: [],
     uploadedAt: new Date().toISOString(),
   };
 }

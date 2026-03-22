@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { FileSearch, LoaderCircle, Upload } from 'lucide-react';
 import {
+  findPageCalibration,
   describeDistanceMeasurement,
   describePolygonMeasurement,
 } from '@/lib/ocrMeasurements';
@@ -8,6 +9,7 @@ import type {
   AICandidate,
   BoundingBox,
   Drawing,
+  DrawingDistanceMeasurement,
   DrawingMeasurementMode,
   DrawingMeasurementPoint,
   DrawingPolygonMeasurement,
@@ -37,10 +39,12 @@ interface OcrReviewPanelProps {
   resolvedLevelKeys: string[];
   resolvedLinkKeys: string[];
   savedMeasurements: Drawing['manualMeasurements'];
+  measurementCalibrations: Drawing['measurementCalibrations'];
   onAdoptLevelCandidate: (groupId: string, item: { pageNo: number; box: BoundingBox; text: string; value: string | null }) => void;
   onAdoptPlanSectionLink: (callout: string, linkId: string) => void;
   onSaveDistanceMeasurement: (pageNo: number, points: [DrawingMeasurementPoint, DrawingMeasurementPoint]) => void;
   onSavePolygonMeasurement: (pageNo: number, points: DrawingPolygonMeasurement['points']) => void;
+  onSetMeasurementCalibration: (pageNo: number, measurementId: string, actualLengthMeters: number) => void;
 }
 
 export interface OcrReviewPanelHandle {
@@ -54,6 +58,80 @@ function derivePageItems(items: OcrItem[], pageNo: number) {
 
 function derivePageCandidates(candidates: AICandidate[], pageNo: number) {
   return candidates.filter((candidate) => candidate.sourcePage === pageNo);
+}
+
+function MeasurementCalibrationModal({
+  open,
+  measurement,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  measurement: DrawingDistanceMeasurement | null;
+  onClose: () => void;
+  onConfirm: (actualLengthMeters: number) => void;
+}) {
+  const [value, setValue] = useState('');
+
+  useEffect(() => {
+    setValue('');
+  }, [measurement?.id, open]);
+
+  if (!open || !measurement) return null;
+
+  const numericValue = Number(value);
+  const isValid = Number.isFinite(numericValue) && numericValue > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4">
+      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-2xl">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <div className="text-sm font-semibold text-slate-800">基準寸法を設定</div>
+          <div className="mt-1 text-xs leading-5 text-slate-500">
+            選んだ距離計測に実寸を与えて、このページの換算基準にします。
+          </div>
+        </div>
+        <div className="space-y-3 px-5 py-4">
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{measurement.name}</div>
+            <div className="mt-1 text-sm text-slate-700">ピクセル距離: {measurement.pixelLength.toFixed(1)} px</div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-800">実寸</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="0"
+                step="0.001"
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                className="w-full rounded border border-slate-300 px-3 py-2 text-sm"
+                placeholder="例: 12.400"
+              />
+              <span className="text-xs text-slate-500">m</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            disabled={!isValid}
+            onClick={() => onConfirm(numericValue)}
+            className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            基準寸法として保存
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(function OcrReviewPanel({
@@ -75,15 +153,18 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
   resolvedLevelKeys,
   resolvedLinkKeys,
   savedMeasurements,
+  measurementCalibrations,
   onAdoptLevelCandidate,
   onAdoptPlanSectionLink,
   onSaveDistanceMeasurement,
   onSavePolygonMeasurement,
+  onSetMeasurementCalibration,
 }: OcrReviewPanelProps, ref) {
   const [selectedPageNo, setSelectedPageNo] = useState(1);
   const [zoom, setZoom] = useState(0.45);
   const [measurementMode, setMeasurementMode] = useState<DrawingMeasurementMode>('idle');
   const [draftMeasurementPoints, setDraftMeasurementPoints] = useState<DrawingMeasurementPoint[]>([]);
+  const [pendingCalibrationMeasurement, setPendingCalibrationMeasurement] = useState<DrawingDistanceMeasurement | null>(null);
   const [structuredFocusBox, setStructuredFocusBox] = useState<BoundingBox | null>(null);
   const [compareOverlays, setCompareOverlays] = useState<Array<{
     id: string;
@@ -119,13 +200,15 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
       setSelectedPageNo(1);
       setStructuredFocusBox(null);
       setCompareOverlays([]);
+      setPendingCalibrationMeasurement(null);
       return;
     }
-      setSelectedPageNo(activeDrawing.pages[0]?.pageNo ?? 1);
-      setStructuredFocusBox(null);
-      setCompareOverlays([]);
-      setMeasurementMode('idle');
-      setDraftMeasurementPoints([]);
+    setSelectedPageNo(activeDrawing.pages[0]?.pageNo ?? 1);
+    setStructuredFocusBox(null);
+    setCompareOverlays([]);
+    setMeasurementMode('idle');
+    setDraftMeasurementPoints([]);
+    setPendingCalibrationMeasurement(null);
   }, [activeDrawing?.id]);
 
   const activeCandidate = activeDrawing?.aiCandidates.find((candidate) => candidate.id === activeCandidateId) ?? null;
@@ -155,6 +238,7 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
   const pageCandidates = activeDrawing ? derivePageCandidates(activeDrawing.aiCandidates, selectedPageNo) : [];
   const pageMeasurements = savedMeasurements.filter((measurement) => measurement.pageNo === selectedPageNo);
   const latestMeasurements = [...pageMeasurements].slice(-4).reverse();
+  const pageCalibration = findPageCalibration(selectedPageNo, measurementCalibrations);
 
   const focusBox: BoundingBox | null = structuredFocusBox ?? activeCandidate?.sourceBox ?? activeItem?.box ?? null;
 
@@ -421,8 +505,14 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
           <div className="rounded-md border border-slate-200 bg-white px-3 py-3">
             <div className="text-sm font-semibold text-slate-800">手動計測</div>
             <div className="mt-1 text-[11px] leading-5 text-slate-500">
-              point-to-point と polygon はページ実寸と図面縮尺が取れたときだけ m / m² へ換算します。取れない場合は px / px² で止めます。
+              point-to-point と polygon はページ実寸と図面縮尺、または基準寸法 1 本から m / m² へ換算します。取れない場合は px / px² で止めます。
             </div>
+            {pageCalibration && (
+              <div className="mt-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+                現在の基準寸法: {pageCalibration.measurementName} / {pageCalibration.actualLengthMeters} m
+                <div className="mt-1">このページの距離・面積計測は実長換算され、数量候補へ自動反映されます。</div>
+              </div>
+            )}
             <div className="mt-3 space-y-2">
               {latestMeasurements.length === 0 ? (
                 <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-500">
@@ -432,8 +522,8 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
                 const measurementPage = activeDrawing?.pages.find((item) => item.pageNo === measurement.pageNo);
                 if (!measurementPage || !activeDrawing) return null;
                 const summary = measurement.measurementType === 'distance'
-                  ? describeDistanceMeasurement(measurement.pixelLength, measurementPage, activeDrawing.resolvedUnits)
-                  : describePolygonMeasurement(measurement.pixelArea, measurementPage, activeDrawing.resolvedUnits);
+                  ? describeDistanceMeasurement(measurement.pixelLength, measurementPage, activeDrawing.resolvedUnits, measurementCalibrations)
+                  : describePolygonMeasurement(measurement.pixelArea, measurementPage, activeDrawing.resolvedUnits, measurementCalibrations);
                 return (
                   <div key={measurement.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
                     <div className="flex items-center justify-between gap-2">
@@ -442,6 +532,17 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
                     </div>
                     <div className="mt-1">{summary.value}</div>
                     <div className="mt-1 text-[11px] text-slate-500">{summary.note}</div>
+                    {measurement.measurementType === 'distance' && (
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setPendingCalibrationMeasurement(measurement)}
+                          className="rounded-md border border-slate-300 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          基準寸法にする
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -483,6 +584,21 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
           />
         </div>
       </div>
+
+      <MeasurementCalibrationModal
+        open={Boolean(pendingCalibrationMeasurement)}
+        measurement={pendingCalibrationMeasurement}
+        onClose={() => setPendingCalibrationMeasurement(null)}
+        onConfirm={(actualLengthMeters) => {
+          if (!pendingCalibrationMeasurement) return;
+          onSetMeasurementCalibration(
+            pendingCalibrationMeasurement.pageNo,
+            pendingCalibrationMeasurement.id,
+            actualLengthMeters,
+          );
+          setPendingCalibrationMeasurement(null);
+        }}
+      />
     </div>
   );
 });

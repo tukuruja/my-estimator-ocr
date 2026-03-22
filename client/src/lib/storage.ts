@@ -105,6 +105,7 @@ function normalizeDrawing(projectId: string, raw: unknown, index: number): Drawi
     reviewQueue: Array.isArray(source.reviewQueue) ? source.reviewQueue : [],
     manualResolutions: Array.isArray(source.manualResolutions) ? source.manualResolutions : [],
     manualMeasurements: Array.isArray(source.manualMeasurements) ? source.manualMeasurements : [],
+    measurementCalibrations: Array.isArray(source.measurementCalibrations) ? source.measurementCalibrations : [],
   };
 }
 

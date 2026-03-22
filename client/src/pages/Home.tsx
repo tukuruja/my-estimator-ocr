@@ -12,6 +12,7 @@ import { calculate } from '@/lib/calculations';
 import {
   buildDistanceMeasurementName,
   buildPolygonMeasurementName,
+  calculateMetersPerPixelFromReference,
   convertAreaPixelsToSquareMeters,
   convertDistancePixelsToMeters,
   calculateDistancePixels,
@@ -40,8 +41,10 @@ import {
   type BlockType,
   type BoundingBox,
   type Drawing,
+  type DrawingDistanceMeasurement,
   type DrawingManualResolution,
   type DrawingMeasurementPoint,
+  type DrawingMeasurementCalibration,
   type EstimateBlock,
   type EstimateZone,
   type GeneratedReportBundle,
@@ -376,6 +379,7 @@ function buildDrawingFromParseResponse(
       sourceBox: candidate.sourceBox,
       reason: matchedMaster ? `${candidate.reason} / 単価マスタ名へ正規化` : candidate.reason,
       requiresReview: candidate.requiresReview || Boolean(masterType && rawTextValue && !matchedMaster),
+      candidateOrigin: 'ocr',
     };
   });
 
@@ -438,6 +442,7 @@ function buildDrawingFromParseResponse(
     })),
     manualResolutions: [],
     manualMeasurements: [],
+    measurementCalibrations: [],
     uploadedAt: new Date().toISOString(),
     lastParsedAt: new Date().toISOString(),
   };
@@ -575,6 +580,247 @@ function applyCandidateValue(block: EstimateBlock, candidate: AICandidate, drawi
   }
 
   return nextBlock;
+}
+
+function buildCandidateKey(fieldName: string, value: string | number, sourceText: string, sourcePage: number): string {
+  return `${fieldName}::${String(value)}::${sourceText}::${sourcePage}`;
+}
+
+function dedupeCandidates(candidates: AICandidate[]): AICandidate[] {
+  const seen = new Set<string>();
+  const next: AICandidate[] = [];
+  candidates.forEach((candidate) => {
+    const value = candidate.valueType === 'number'
+      ? candidate.valueNumber ?? Number(candidate.valueText ?? 0)
+      : candidate.valueText ?? String(candidate.valueNumber ?? '');
+    const key = buildCandidateKey(candidate.fieldName, value, candidate.sourceText, candidate.sourcePage);
+    if (seen.has(key)) return;
+    seen.add(key);
+    next.push(candidate);
+  });
+  return next;
+}
+
+function getRealLengthForMeasurement(
+  measurement: DrawingDistanceMeasurement,
+  drawing: Drawing,
+): number | null {
+  const page = drawing.pages.find((item) => item.pageNo === measurement.pageNo);
+  if (!page) return null;
+  return convertDistancePixelsToMeters(
+    measurement.pixelLength,
+    page,
+    drawing.resolvedUnits,
+    drawing.measurementCalibrations,
+  );
+}
+
+function getRealAreaForMeasurement(
+  measurement: Drawing['manualMeasurements'][number],
+  drawing: Drawing,
+): number | null {
+  if (measurement.measurementType !== 'polygon') return null;
+  const page = drawing.pages.find((item) => item.pageNo === measurement.pageNo);
+  if (!page) return null;
+  return convertAreaPixelsToSquareMeters(
+    measurement.pixelArea,
+    page,
+    drawing.resolvedUnits,
+    drawing.measurementCalibrations,
+  );
+}
+
+function buildMeasurementDerivedCandidates(
+  drawing: Drawing,
+  block: EstimateBlock,
+  masters: PriceMasterItem[],
+  effectiveDate: string,
+): AICandidate[] {
+  const pageScaleKnown = Boolean(drawing.resolvedUnits?.sheetScaleRatio);
+  const calibratedDistanceMeasurements = drawing.manualMeasurements
+    .filter((measurement): measurement is DrawingDistanceMeasurement => measurement.measurementType === 'distance')
+    .map((measurement) => ({
+      measurement,
+      realLength: getRealLengthForMeasurement(measurement, drawing),
+    }))
+    .filter((entry) => entry.realLength !== null)
+    .sort((left, right) => (right.realLength ?? 0) - (left.realLength ?? 0));
+
+  const calibratedPolygonMeasurements = drawing.manualMeasurements
+    .filter((measurement) => measurement.measurementType === 'polygon')
+    .map((measurement) => ({
+      measurement,
+      realArea: getRealAreaForMeasurement(measurement, drawing),
+    }))
+    .filter((entry) => entry.realArea !== null)
+    .sort((left, right) => (right.realArea ?? 0) - (left.realArea ?? 0));
+
+  const workTypeLabel = getWorkTypeLabel(block.blockType);
+  const sheetTypeLabel = drawing.cadStructured?.drawingClassification?.[0]?.sheetTypeName
+    ?? drawing.sheetClassification?.sheetTypeName
+    ?? '未分類';
+  const recommendations: AICandidate[] = [];
+
+  const structuredQuantities = drawing.cadStructured?.quantities ?? [];
+  structuredQuantities.forEach((quantity) => {
+    const fieldName = quantity.fieldName as keyof EstimateBlock;
+    if (!(fieldName in block)) return;
+
+    const rawValue = quantity.value;
+    const valueType = typeof rawValue === 'number' ? 'number' : 'string';
+    const masterType = valueType === 'string'
+      ? masterTypeForCandidate(quantity.fieldName, block.blockType)
+      : null;
+    const rawTextValue = typeof rawValue === 'string' ? rawValue : undefined;
+    const normalized = rawTextValue && masterType
+      ? canonicalizeMasterName(masters, masterType, rawTextValue, effectiveDate)
+      : null;
+    const valueText = normalized?.value ?? rawTextValue;
+    const matchedMaster = normalized?.matched ?? false;
+
+    recommendations.push({
+      id: crypto.randomUUID(),
+      fieldName: quantity.fieldName,
+      label: quantity.label || CANDIDATE_LABELS[quantity.fieldName] || quantity.fieldName,
+      valueType,
+      valueText,
+      valueNumber: typeof rawValue === 'number' ? rawValue : undefined,
+      confidence: quantity.confidence,
+      sourceText: quantity.sourceText,
+      sourcePage: quantity.sourcePage,
+      sourceBox: quantity.sourceBox,
+      reason: matchedMaster
+        ? `cadStructured quantity を単価マスタ名へ正規化して採用`
+        : `cadStructured quantity を ${workTypeLabel} の数量候補へ反映`,
+      requiresReview: quantity.requiresReview || Boolean(masterType && rawTextValue && !matchedMaster),
+      candidateOrigin: 'cad_structured',
+    });
+  });
+
+  const longestDistance = calibratedDistanceMeasurements[0];
+  if (longestDistance) {
+    recommendations.push({
+      id: crypto.randomUUID(),
+      fieldName: 'distance',
+      label: CANDIDATE_LABELS.distance,
+      valueType: 'number',
+      valueNumber: Number(longestDistance.realLength?.toFixed(4) ?? 0),
+      confidence: pageScaleKnown ? 0.93 : 0.91,
+      sourceText: `${longestDistance.measurement.name} / ${sheetTypeLabel}`,
+      sourcePage: longestDistance.measurement.pageNo,
+      sourceBox: [
+        longestDistance.measurement.points[0].x,
+        longestDistance.measurement.points[0].y,
+        longestDistance.measurement.points[1].x,
+        longestDistance.measurement.points[1].y,
+        longestDistance.measurement.points[1].x,
+        longestDistance.measurement.points[1].y,
+        longestDistance.measurement.points[0].x,
+        longestDistance.measurement.points[0].y,
+      ],
+      reason: `${workTypeLabel} と CAD structured classification を使い、手動距離計測から施工延長候補を生成`,
+      requiresReview: false,
+      candidateOrigin: 'manual_measurement',
+    });
+  }
+
+  const largestArea = calibratedPolygonMeasurements[0];
+  if (largestArea?.realArea !== null) {
+    if (block.blockType === 'pavement') {
+      if (block.pavementWidth > 0) {
+        recommendations.push({
+          id: crypto.randomUUID(),
+          fieldName: 'distance',
+          label: CANDIDATE_LABELS.distance,
+          valueType: 'number',
+          valueNumber: Number((largestArea.realArea / block.pavementWidth).toFixed(4)),
+          confidence: 0.88,
+          sourceText: `${largestArea.measurement.name} / 面積 ${largestArea.realArea}m²`,
+          sourcePage: largestArea.measurement.pageNo,
+          sourceBox: [0, 0, 0, 0, 0, 0, 0, 0],
+          reason: 'polygon 面積計測 ÷ 入力済み舗装幅で延長候補を算出',
+          requiresReview: false,
+          candidateOrigin: 'manual_measurement',
+        });
+      } else if (block.distance > 0) {
+        recommendations.push({
+          id: crypto.randomUUID(),
+          fieldName: 'pavementWidth',
+          label: CANDIDATE_LABELS.pavementWidth,
+          valueType: 'number',
+          valueNumber: Number((largestArea.realArea / block.distance).toFixed(4)),
+          confidence: 0.88,
+          sourceText: `${largestArea.measurement.name} / 面積 ${largestArea.realArea}m²`,
+          sourcePage: largestArea.measurement.pageNo,
+          sourceBox: [0, 0, 0, 0, 0, 0, 0, 0],
+          reason: 'polygon 面積計測 ÷ 入力済み延長で舗装幅候補を算出',
+          requiresReview: false,
+          candidateOrigin: 'manual_measurement',
+        });
+      }
+    }
+
+    if (block.blockType === 'demolition') {
+      if (block.demolitionWidth > 0) {
+        recommendations.push({
+          id: crypto.randomUUID(),
+          fieldName: 'distance',
+          label: CANDIDATE_LABELS.distance,
+          valueType: 'number',
+          valueNumber: Number((largestArea.realArea / block.demolitionWidth).toFixed(4)),
+          confidence: 0.88,
+          sourceText: `${largestArea.measurement.name} / 面積 ${largestArea.realArea}m²`,
+          sourcePage: largestArea.measurement.pageNo,
+          sourceBox: [0, 0, 0, 0, 0, 0, 0, 0],
+          reason: 'polygon 面積計測 ÷ 入力済み撤去幅で延長候補を算出',
+          requiresReview: false,
+          candidateOrigin: 'manual_measurement',
+        });
+      } else if (block.distance > 0) {
+        recommendations.push({
+          id: crypto.randomUUID(),
+          fieldName: 'demolitionWidth',
+          label: CANDIDATE_LABELS.demolitionWidth,
+          valueType: 'number',
+          valueNumber: Number((largestArea.realArea / block.distance).toFixed(4)),
+          confidence: 0.88,
+          sourceText: `${largestArea.measurement.name} / 面積 ${largestArea.realArea}m²`,
+          sourcePage: largestArea.measurement.pageNo,
+          sourceBox: [0, 0, 0, 0, 0, 0, 0, 0],
+          reason: 'polygon 面積計測 ÷ 入力済み延長で撤去幅候補を算出',
+          requiresReview: false,
+          candidateOrigin: 'manual_measurement',
+        });
+      }
+    }
+  }
+
+  return dedupeCandidates(recommendations);
+}
+
+function rebuildDrawingCandidates(
+  drawing: Drawing,
+  block: EstimateBlock,
+  masters: PriceMasterItem[],
+  effectiveDate: string,
+): Drawing {
+  const baseCandidates = drawing.aiCandidates.filter((candidate) => (
+    candidate.candidateOrigin !== 'cad_structured'
+    && candidate.candidateOrigin !== 'manual_measurement'
+  ));
+  const derivedCandidates = buildMeasurementDerivedCandidates(
+    {
+      ...drawing,
+      aiCandidates: baseCandidates,
+    },
+    block,
+    masters,
+    effectiveDate,
+  );
+  return {
+    ...drawing,
+    aiCandidates: [...baseCandidates, ...derivedCandidates],
+  };
 }
 
 function createBlockForType(projectId: string, blockType: BlockType, baseName: string, drawingId: string | null = null): EstimateBlock {
@@ -854,8 +1100,23 @@ export default function Home({ preferredBlockType }: HomeProps) {
         }
         return updatedBlock;
       }),
+      drawings: project.drawings.map((drawing) => {
+        if (!activeDrawing || drawing.id !== activeDrawing.id) return drawing;
+        const updatedBlock = project.blocks.map((block) => {
+          if (block.id !== activeBlock.id) return block;
+          const next = { ...block, [field]: value } as EstimateBlock;
+          if (field === 'secondaryProduct' && typeof value === 'string' && value) {
+            next.name = value;
+          }
+          if (field === 'blockType' && typeof value === 'string') {
+            next.name = next.secondaryProduct || `${getWorkTypeLabel(value as BlockType)} 見積`;
+          }
+          return next;
+        }).find((block) => block.id === activeBlock.id) ?? activeBlock;
+        return rebuildDrawingCandidates(drawing, updatedBlock, masters, effectiveDate);
+      }),
     }));
-  }, [activeProject, activeBlock, replaceActiveProject]);
+  }, [activeDrawing, activeProject, activeBlock, effectiveDate, masters, replaceActiveProject]);
 
   const handleZoneChange = useCallback((zoneId: string, field: keyof EstimateZone, value: EstimateZone[keyof EstimateZone]) => {
     if (!activeProject || !activeBlock) return;
@@ -1029,7 +1290,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
         onProgress: handleOcrJobProgress,
         learningContext: ocrLearningContext,
       });
-      const nextDrawing = buildDrawingFromParseResponse(
+      const parsedDrawing = buildDrawingFromParseResponse(
         activeProject.id,
         file,
         payload,
@@ -1037,6 +1298,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
         masters,
         new Date().toISOString().slice(0, 10),
       );
+      const nextDrawing = rebuildDrawingCandidates(parsedDrawing, activeBlock, masters, effectiveDate);
 
       replaceActiveProject((project) => ({
         ...project,
@@ -1226,12 +1488,17 @@ export default function Home({ preferredBlockType }: HomeProps) {
   }, [activeDrawing, activeProject, replaceActiveProject]);
 
   const handleSaveDistanceMeasurement = useCallback((pageNo: number, points: [DrawingMeasurementPoint, DrawingMeasurementPoint]) => {
-    if (!activeProject || !activeDrawing) return;
+    if (!activeProject || !activeDrawing || !activeBlock) return;
     const page = activeDrawing.pages.find((item) => item.pageNo === pageNo);
     if (!page) return;
 
     const pixelLength = calculateDistancePixels(points[0], points[1]);
-    const realLength = convertDistancePixelsToMeters(pixelLength, page, activeDrawing.resolvedUnits);
+    const realLength = convertDistancePixelsToMeters(
+      pixelLength,
+      page,
+      activeDrawing.resolvedUnits,
+      activeDrawing.measurementCalibrations,
+    );
     const nextCount = (activeDrawing.manualMeasurements?.filter((item) => item.measurementType === 'distance').length ?? 0) + 1;
 
     replaceActiveProject((project) => ({
@@ -1239,7 +1506,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
       drawings: project.drawings.map((drawing) => (
         drawing.id !== activeDrawing.id
           ? drawing
-          : {
+          : rebuildDrawingCandidates({
               ...drawing,
               manualMeasurements: [
                 ...(drawing.manualMeasurements ?? []),
@@ -1255,20 +1522,25 @@ export default function Home({ preferredBlockType }: HomeProps) {
                   createdAt: new Date().toISOString(),
                 },
               ],
-            }
+            }, activeBlock, masters, effectiveDate)
       )),
     }));
 
     toast.success(realLength !== null ? `距離を ${realLength} m で保存しました。` : `距離を ${pixelLength.toFixed(1)} px で保存しました。`);
-  }, [activeDrawing, activeProject, replaceActiveProject]);
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate, masters, replaceActiveProject]);
 
   const handleSavePolygonMeasurement = useCallback((pageNo: number, points: DrawingMeasurementPoint[]) => {
-    if (!activeProject || !activeDrawing) return;
+    if (!activeProject || !activeDrawing || !activeBlock) return;
     const page = activeDrawing.pages.find((item) => item.pageNo === pageNo);
     if (!page) return;
 
     const pixelArea = calculatePolygonAreaPixels(points);
-    const realArea = convertAreaPixelsToSquareMeters(pixelArea, page, activeDrawing.resolvedUnits);
+    const realArea = convertAreaPixelsToSquareMeters(
+      pixelArea,
+      page,
+      activeDrawing.resolvedUnits,
+      activeDrawing.measurementCalibrations,
+    );
     const nextCount = (activeDrawing.manualMeasurements?.filter((item) => item.measurementType === 'polygon').length ?? 0) + 1;
 
     replaceActiveProject((project) => ({
@@ -1276,7 +1548,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
       drawings: project.drawings.map((drawing) => (
         drawing.id !== activeDrawing.id
           ? drawing
-          : {
+          : rebuildDrawingCandidates({
               ...drawing,
               manualMeasurements: [
                 ...(drawing.manualMeasurements ?? []),
@@ -1292,12 +1564,53 @@ export default function Home({ preferredBlockType }: HomeProps) {
                   createdAt: new Date().toISOString(),
                 },
               ],
-            }
+            }, activeBlock, masters, effectiveDate)
       )),
     }));
 
     toast.success(realArea !== null ? `面積を ${realArea} m² で保存しました。` : `面積を ${pixelArea.toFixed(1)} px² で保存しました。`);
-  }, [activeDrawing, activeProject, replaceActiveProject]);
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate, masters, replaceActiveProject]);
+
+  const handleSetMeasurementCalibration = useCallback((pageNo: number, measurementId: string, actualLengthMeters: number) => {
+    if (!activeProject || !activeDrawing || !activeBlock) return;
+    const measurement = activeDrawing.manualMeasurements.find((item): item is DrawingDistanceMeasurement => (
+      item.measurementType === 'distance' && item.id === measurementId
+    ));
+    if (!measurement) return;
+
+    const metersPerPixel = calculateMetersPerPixelFromReference(measurement, actualLengthMeters);
+    if (!Number.isFinite(metersPerPixel) || metersPerPixel <= 0) {
+      toast.error('基準寸法の換算に失敗しました。');
+      return;
+    }
+
+    const nextCalibration: DrawingMeasurementCalibration = {
+      id: crypto.randomUUID(),
+      pageNo,
+      measurementId,
+      measurementName: measurement.name,
+      actualLengthMeters,
+      pixelLength: measurement.pixelLength,
+      metersPerPixel,
+      createdAt: new Date().toISOString(),
+    };
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => {
+        if (drawing.id !== activeDrawing.id) return drawing;
+        return rebuildDrawingCandidates({
+          ...drawing,
+          measurementCalibrations: [
+            ...(drawing.measurementCalibrations ?? []).filter((item) => item.pageNo !== pageNo),
+            nextCalibration,
+          ],
+        }, activeBlock, masters, effectiveDate);
+      }),
+    }));
+
+    toast.success(`${measurement.name} を ${actualLengthMeters} m の基準寸法として保存しました。`);
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate, masters, replaceActiveProject]);
 
   if (!initialized || !appState || !activeProject || !activeBlock || !result) {
     return (
@@ -1430,10 +1743,12 @@ export default function Home({ preferredBlockType }: HomeProps) {
             resolvedLevelKeys={resolvedLevelKeys}
             resolvedLinkKeys={resolvedLinkKeys}
             savedMeasurements={activeDrawing?.manualMeasurements ?? []}
+            measurementCalibrations={activeDrawing?.measurementCalibrations ?? []}
             onAdoptLevelCandidate={handleRequestAdoptLevelCandidate}
             onAdoptPlanSectionLink={handleAdoptPlanSectionLink}
             onSaveDistanceMeasurement={handleSaveDistanceMeasurement}
             onSavePolygonMeasurement={handleSavePolygonMeasurement}
+            onSetMeasurementCalibration={handleSetMeasurementCalibration}
           />
 
           <div className="space-y-2">
