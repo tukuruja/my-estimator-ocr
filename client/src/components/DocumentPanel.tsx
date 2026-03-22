@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Download, FileSpreadsheet, ShieldAlert } from 'lucide-react';
+import { Download, FileSpreadsheet, Printer, ShieldAlert } from 'lucide-react';
+import { toast } from 'sonner';
 
 import type { Drawing, GeneratedReportBundle, WorkTypeCandidate } from '@/lib/types';
+import { openChangeEstimatePrintView } from '@/lib/changeEstimatePrint';
 
 interface DocumentPanelProps {
   bundle: GeneratedReportBundle;
@@ -38,6 +40,7 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
   const workTypeCandidates = drawing?.workTypeCandidates ?? [];
 
   const filePrefix = useMemo(() => `${projectName || '案件'}_${estimateName || '見積'}`, [estimateName, projectName]);
+  const generatedAt = useMemo(() => new Date().toLocaleString('ja-JP'), []);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -156,38 +159,59 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
               <div className="text-xs leading-5 text-slate-600">
                 区画ごとの変更数量、再段取り、仮復旧、他工種調整、図面根拠、備考写真をまとめた専用帳票です。
               </div>
-              <button
-                type="button"
-                onClick={() => exportCsv(
-                  `${filePrefix}_変更見積書.csv`,
-                  ['区画', '工事項目', '仕様', '数量', '単位', '配賦率', '基本額', '再段取り回数', '再段取り額', '仮復旧率', '仮復旧数量', '仮復旧額', '他工種調整率', '他工種調整額', '区画金額', '図面ページ', '他工種名', '備考写真', '備考', '根拠'],
-                  bundle.changeEstimateRows.map((row) => [
-                    row.zoneName,
-                    row.itemName,
-                    row.specification,
-                    row.quantity,
-                    row.unit,
-                    row.quantityShare,
-                    row.baseAmount,
-                    row.remobilizationCount,
-                    row.remobilizationAmount,
-                    row.temporaryRestorationRate,
-                    row.temporaryRestorationQuantity,
-                    row.temporaryRestorationAmount,
-                    row.coordinationAdjustmentRate,
-                    row.coordinationAdjustmentAmount,
-                    row.totalAmount,
-                    row.drawingPageRefs.map((pageNo) => `p.${pageNo}`).join(', '),
-                    row.relatedTradeNames.join(', '),
-                    row.notePhotoUrls.join('\n'),
-                    row.remarks,
-                    row.sourceSummary,
-                  ]),
-                )}
-                className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
-              >
-                <Download className="h-4 w-4" /> CSV出力
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      openChangeEstimatePrintView({
+                        projectName,
+                        estimateName,
+                        generatedAt,
+                        rows: bundle.changeEstimateRows,
+                        totalAmount: bundle.summary.changeEstimateTotalAmount,
+                      });
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : 'PDF出力に失敗しました。');
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                >
+                  <Printer className="h-4 w-4" /> PDF出力
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportCsv(
+                    `${filePrefix}_変更見積書.csv`,
+                    ['区画', '工事項目', '仕様', '数量', '単位', '配賦率', '基本額', '再段取り回数', '再段取り額', '仮復旧率', '仮復旧数量', '仮復旧額', '他工種調整率', '他工種調整額', '区画金額', '図面ページ', '他工種名', '備考写真', '備考', '根拠'],
+                    bundle.changeEstimateRows.map((row) => [
+                      row.zoneName,
+                      row.itemName,
+                      row.specification,
+                      row.quantity,
+                      row.unit,
+                      row.quantityShare,
+                      row.baseAmount,
+                      row.remobilizationCount,
+                      row.remobilizationAmount,
+                      row.temporaryRestorationRate,
+                      row.temporaryRestorationQuantity,
+                      row.temporaryRestorationAmount,
+                      row.coordinationAdjustmentRate,
+                      row.coordinationAdjustmentAmount,
+                      row.totalAmount,
+                      row.drawingPageRefs.map((pageNo) => `p.${pageNo}`).join(', '),
+                      row.relatedTradeNames.join(', '),
+                      row.notePhotoUrls.join('\n'),
+                      row.remarks,
+                      row.sourceSummary,
+                    ]),
+                  )}
+                  className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+                >
+                  <Download className="h-4 w-4" /> CSV出力
+                </button>
+              </div>
             </div>
             {bundle.changeEstimateRows.length === 0 ? (
               <div className="rounded-md border border-dashed border-cyan-300 bg-cyan-50 px-4 py-6 text-sm text-slate-600">
