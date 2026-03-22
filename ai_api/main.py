@@ -537,6 +537,19 @@ def render_pdf_pages(file_bytes: bytes) -> list[Image.Image]:
     return pages
 
 
+def extract_pdf_page_sizes_mm(file_bytes: bytes) -> list[dict[str, float]]:
+    document = fitz.open(stream=file_bytes, filetype="pdf")
+    page_sizes: list[dict[str, float]] = []
+    for page in document:
+        width_mm = round(float(page.rect.width) * 25.4 / 72.0, 2)
+        height_mm = round(float(page.rect.height) * 25.4 / 72.0, 2)
+        page_sizes.append({
+            "physicalWidthMm": width_mm,
+            "physicalHeightMm": height_mm,
+        })
+    return page_sizes
+
+
 def load_image_pages(file_bytes: bytes) -> list[Image.Image]:
     image = Image.open(io.BytesIO(file_bytes))
     return [ImageOps.exif_transpose(image).convert("RGB")]
@@ -1324,6 +1337,262 @@ def extract_structured_ocr_signals(ocr_items: list[dict[str, Any]], learning_con
     }
 
 
+def build_cad_structured_output(
+    *,
+    file_name: str,
+    file_type: str,
+    page_previews: list[dict[str, Any]],
+    media_route: dict[str, Any],
+    titleblock_meta: dict[str, Any],
+    sheet_classification: dict[str, Any],
+    resolved_units: dict[str, Any],
+    legend_resolution: dict[str, Any],
+    ocr_structured: dict[str, Any],
+    ai_candidates: dict[str, Any],
+    work_type_candidates: list[dict[str, Any]],
+    review_queue: list[dict[str, Any]],
+    business_document: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    page_role_map = {
+        int(page_role.get("pageNo", 0)): [role.get("role", "unknown") for role in page_role.get("roles", [])]
+        for page_role in ocr_structured.get("pageRoles", [])
+    }
+    link_map: dict[int, set[str]] = {}
+    for link in ocr_structured.get("planSectionLinks", []):
+        callout = str(link.get("callout", "")).strip()
+        if not callout:
+            continue
+        link_map.setdefault(int(link.get("sourcePageNo", 0)), set()).add(callout)
+        link_map.setdefault(int(link.get("targetPageNo", 0)), set()).add(callout)
+
+    page_analysis = []
+    for preview in page_previews:
+        page_no = int(preview.get("page", 0))
+        page_analysis.append({
+            "pageNo": page_no,
+            "sourceMediaType": media_route.get("sourceMediaType", "unknown"),
+            "preferredPipeline": media_route.get("preferredPipeline", "manual_review"),
+            "roles": page_role_map.get(page_no, []),
+            "callouts": sorted(link_map.get(page_no, set())),
+            "dimensionCount": sum(1 for item in ocr_structured.get("dimensionCandidates", []) if int(item.get("pageNo", 0)) == page_no),
+            "levelCount": sum(1 for item in ocr_structured.get("levelCandidates", []) if int(item.get("pageNo", 0)) == page_no),
+            "physicalWidthMm": preview.get("physicalWidthMm"),
+            "physicalHeightMm": preview.get("physicalHeightMm"),
+        })
+
+    drawing_classification = [
+        {
+            "pageNo": analysis["pageNo"],
+            "discipline": sheet_classification.get("discipline", "unknown"),
+            "sheetTypeName": sheet_classification.get("sheetTypeName", "未分類"),
+            "workTypeCandidates": [
+                {
+                    "blockType": item.get("blockType", "secondary_product"),
+                    "label": item.get("label", "未分類"),
+                    "confidence": item.get("confidence", 0.0),
+                }
+                for item in work_type_candidates[:4]
+            ],
+        }
+        for analysis in page_analysis
+    ]
+
+    cad_entities: list[dict[str, Any]] = []
+    for index, item in enumerate(ocr_structured.get("dimensionCandidates", [])[:80], start=1):
+        cad_entities.append({
+            "id": f"dim-{index}",
+            "pageNo": item.get("pageNo"),
+            "entityType": "dimension",
+            "sourceText": item.get("text", ""),
+            "bbox": item.get("bbox", []),
+            "confidence": item.get("confidence", 0.0),
+        })
+    for index, item in enumerate(ocr_structured.get("levelCandidates", [])[:80], start=1):
+        cad_entities.append({
+            "id": f"lvl-{index}",
+            "pageNo": item.get("pageNo"),
+            "entityType": "level",
+            "sourceText": item.get("text", ""),
+            "bbox": item.get("bbox", []),
+            "confidence": item.get("confidence", 0.0),
+        })
+    for index, item in enumerate(ocr_structured.get("planSectionLinks", [])[:80], start=1):
+        cad_entities.append({
+            "id": f"callout-{index}",
+            "pageNo": item.get("sourcePageNo"),
+            "entityType": "callout",
+            "sourceText": item.get("callout", ""),
+            "bbox": item.get("sourceBox", []),
+            "confidence": item.get("confidence", 0.0),
+        })
+    for index, item in enumerate(ocr_structured.get("tableCandidates", [])[:40], start=1):
+        cad_entities.append({
+            "id": f"tbl-{index}",
+            "pageNo": item.get("pageNo"),
+            "entityType": "table",
+            "sourceText": item.get("text", ""),
+            "bbox": item.get("bbox", []),
+            "confidence": item.get("confidence", 0.0),
+        })
+
+    objects = []
+    for index, item in enumerate(legend_resolution.get("legendDictionary", [])[:40], start=1):
+        objects.append({
+            "id": f"legend-{index}",
+            "pageNo": 1,
+            "objectType": "legend_term",
+            "label": item.get("raw", ""),
+            "canonical": item.get("canonical", ""),
+            "confidence": 0.82,
+        })
+    for index, item in enumerate(legend_resolution.get("normalizedTerms", [])[:60], start=1):
+        objects.append({
+            "id": f"term-{index}",
+            "pageNo": 1,
+            "objectType": "normalized_term",
+            "label": item.get("raw", ""),
+            "canonical": item.get("canonical", ""),
+            "confidence": 0.78,
+        })
+    for index, item in enumerate(ocr_structured.get("planSectionLinks", [])[:40], start=1):
+        objects.append({
+            "id": f"link-{index}",
+            "pageNo": item.get("sourcePageNo"),
+            "objectType": "sheet_link",
+            "label": item.get("callout", ""),
+            "canonical": f"{item.get('sourceRole', 'plan')}->{item.get('targetRole', 'detail')}",
+            "confidence": item.get("confidence", 0.0),
+        })
+    if business_document and business_document.get("isBusinessDocument"):
+        objects.append({
+            "id": "business-document",
+            "pageNo": 1,
+            "objectType": "business_document",
+            "label": business_document.get("label", "帳票"),
+            "canonical": business_document.get("documentType", "business_document"),
+            "confidence": 0.99,
+        })
+
+    dimensions = []
+    for index, item in enumerate(ocr_structured.get("dimensionCandidates", [])[:80], start=1):
+        dimensions.append({
+            "id": f"dimension-{index}",
+            "pageNo": item.get("pageNo"),
+            "label": "dimension",
+            "sourceText": item.get("text", ""),
+            "bbox": item.get("bbox", []),
+            "values": item.get("values", []),
+            "unit": resolved_units.get("lengthUnit", "unknown"),
+            "status": "confirmed" if resolved_units.get("sheetScaleRatio") else "estimated",
+            "confidence": item.get("confidence", 0.0),
+        })
+    for index, item in enumerate(ocr_structured.get("levelCandidates", [])[:80], start=1):
+        dimensions.append({
+            "id": f"level-{index}",
+            "pageNo": item.get("pageNo"),
+            "label": item.get("token", "level"),
+            "sourceText": item.get("text", ""),
+            "bbox": item.get("bbox", []),
+            "values": [item.get("value")] if item.get("value") is not None else [],
+            "unit": resolved_units.get("elevationUnit", "unknown"),
+            "status": "confirmed" if item.get("value") is not None else "blocked",
+            "confidence": item.get("confidence", 0.0),
+        })
+
+    quantities = []
+    for field_name, candidate in ai_candidates.items():
+        quantities.append({
+            "fieldName": field_name,
+            "label": candidate.get("label", field_name),
+            "value": candidate.get("value"),
+            "confidence": candidate.get("confidence", 0.0),
+            "sourceText": candidate.get("sourceText", ""),
+            "sourcePage": candidate.get("sourcePage", 1),
+            "sourceBox": candidate.get("sourceBox", []),
+            "requiresReview": candidate.get("requiresReview", False),
+        })
+
+    construction_conditions = [
+        {
+            "id": f"condition-{index + 1}",
+            "severity": item.get("severity", "info"),
+            "title": item.get("title", ""),
+            "detail": item.get("detail", ""),
+        }
+        for index, item in enumerate(review_queue[:40])
+    ]
+
+    missing_information: list[str] = []
+    if resolved_units.get("sheetScaleRatio") is None:
+        missing_information.append("図面縮尺")
+    if resolved_units.get("lengthUnit") == "unknown":
+        missing_information.append("長さ単位")
+    if not ocr_structured.get("dimensionCandidates"):
+        missing_information.append("寸法候補")
+    if not work_type_candidates and not (business_document and business_document.get("isBusinessDocument")):
+        missing_information.append("工種候補")
+
+    warnings = [item.get("detail", "") for item in review_queue if item.get("severity") != "critical"][:20]
+    stop_reasons = [item.get("detail", "") for item in review_queue if item.get("severity") == "critical"][:20]
+    if business_document and business_document.get("isBusinessDocument"):
+        stop_reasons.append("帳票文書を検出したため、図面CAD化と数量確定を停止しました。")
+
+    ambiguous_count = len(ocr_structured.get("ambiguousCandidates", []))
+    low_confidence_count = len(ocr_structured.get("lowConfidenceCandidates", []))
+    unresolved_count = len(ocr_structured.get("unresolvedItems", []))
+    recommended_next_inputs = []
+    if "図面縮尺" in missing_information:
+        recommended_next_inputs.append("表題欄の縮尺または基準寸法を確認してください。")
+    if "長さ単位" in missing_information:
+        recommended_next_inputs.append("m / mm の単位表記を確認してください。")
+    if unresolved_count > 0:
+        recommended_next_inputs.append("review queue の未解決項目を閉じてください。")
+    if ambiguous_count > 0:
+        recommended_next_inputs.append("watchlist 候補を bbox 比較で採用してください。")
+
+    human_summary = (
+        f"{sheet_classification.get('sheetTypeName', '未分類')} / {sheet_classification.get('discipline', 'unknown')} と判定しました。"
+        f" CAD向けには entity {len(cad_entities)} 件、dimension {len(dimensions)} 件、quantity {len(quantities)} 件を返します。"
+        f" 未解決 {unresolved_count} 件、watchlist {ambiguous_count} 件です。"
+    )
+
+    return {
+        "documentSummary": {
+            "fileName": file_name,
+            "fileType": file_type,
+            "pageCount": len(page_previews),
+            "drawingNo": titleblock_meta.get("drawingNo"),
+            "drawingTitle": titleblock_meta.get("drawingTitle"),
+            "businessDocument": bool(business_document and business_document.get("isBusinessDocument")),
+        },
+        "pageAnalysis": page_analysis,
+        "drawingClassification": drawing_classification,
+        "scaleAndUnits": {
+            "sheetScale": titleblock_meta.get("sheetScale"),
+            "sheetScaleRatio": resolved_units.get("sheetScaleRatio"),
+            "lengthUnit": resolved_units.get("lengthUnit", "unknown"),
+            "elevationUnit": resolved_units.get("elevationUnit", "unknown"),
+            "viewDirection": resolved_units.get("viewDirection", "unknown"),
+        },
+        "cadEntities": cad_entities[:200],
+        "objects": objects[:200],
+        "dimensions": dimensions[:200],
+        "quantities": quantities[:80],
+        "constructionConditions": construction_conditions,
+        "warnings": warnings,
+        "stopReasons": stop_reasons,
+        "confidenceReview": {
+            "reviewRequired": bool(stop_reasons or unresolved_count or ambiguous_count or low_confidence_count),
+            "unresolvedCount": unresolved_count,
+            "ambiguousCount": ambiguous_count,
+            "lowConfidenceCount": low_confidence_count,
+        },
+        "missingInformation": missing_information,
+        "recommendedNextInputs": recommended_next_inputs,
+        "humanSummary": human_summary,
+    }
+
+
 def build_review_item(queue: str, severity: str, title: str, detail: str, source_text: str | None = None, source_page: int | None = None, field_name: str | None = None) -> dict[str, Any]:
     queue_name = queue if queue in KNOWN_REVIEW_QUEUES else queue
     payload = {
@@ -1647,6 +1916,10 @@ def process_drawing_payload(
 ) -> dict[str, Any]:
     try:
         pages = render_pdf_pages(file_bytes) if file_type == "pdf" else load_image_pages(file_bytes)
+        page_sizes_mm = extract_pdf_page_sizes_mm(file_bytes) if file_type == "pdf" else [
+            {"physicalWidthMm": None, "physicalHeightMm": None}
+            for _ in pages
+        ]
     except Exception as exc:  # pragma: no cover - depends on user input
         raise HTTPException(status_code=422, detail=f"図面の読み込みに失敗しました: {exc}") from exc
 
@@ -1656,11 +1929,14 @@ def process_drawing_payload(
 
     for index, page_image in enumerate(pages, start=1):
         preview_file_name = save_preview_image(page_image)
+        page_size = page_sizes_mm[index - 1] if index - 1 < len(page_sizes_mm) else {"physicalWidthMm": None, "physicalHeightMm": None}
         page_previews.append({
             "imageUrl": build_image_url_from_base(base_url, f"previews/{preview_file_name}"),
             "width": page_image.width,
             "height": page_image.height,
             "page": index,
+            "physicalWidthMm": page_size.get("physicalWidthMm"),
+            "physicalHeightMm": page_size.get("physicalHeightMm"),
         })
 
     if file_type == "pdf" and media_route["preferredPipeline"] == "direct_text":
@@ -1688,6 +1964,21 @@ def process_drawing_payload(
         business_document,
         ocr_structured,
     )
+    cad_structured = build_cad_structured_output(
+        file_name=file_name,
+        file_type=file_type,
+        page_previews=page_previews,
+        media_route=media_route,
+        titleblock_meta=titleblock_meta,
+        sheet_classification=sheet_classification,
+        resolved_units=resolved_units,
+        legend_resolution=legend_resolution,
+        ocr_structured=ocr_structured,
+        ai_candidates=ai_candidates,
+        work_type_candidates=work_type_candidates,
+        review_queue=review_queue,
+        business_document=business_document,
+    )
 
     return {
         "drawingSource": {
@@ -1701,6 +1992,7 @@ def process_drawing_payload(
         "resolvedUnits": resolved_units,
         "legendResolution": legend_resolution,
         "ocrStructured": ocr_structured,
+        "cadStructured": cad_structured,
         "reviewQueue": review_queue,
         "aiCandidates": ai_candidates,
         "workTypeCandidates": work_type_candidates,

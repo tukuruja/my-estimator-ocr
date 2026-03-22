@@ -1,6 +1,18 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { FileSearch, LoaderCircle, Upload } from 'lucide-react';
-import type { AICandidate, BoundingBox, Drawing, OcrItem } from '@/lib/types';
+import {
+  describeDistanceMeasurement,
+  describePolygonMeasurement,
+} from '@/lib/ocrMeasurements';
+import type {
+  AICandidate,
+  BoundingBox,
+  Drawing,
+  DrawingMeasurementMode,
+  DrawingMeasurementPoint,
+  DrawingPolygonMeasurement,
+  OcrItem,
+} from '@/lib/types';
 import OcrCanvas from './OcrCanvas';
 import OcrLineList from './OcrLineList';
 import CandidatePanel from './CandidatePanel';
@@ -24,8 +36,11 @@ interface OcrReviewPanelProps {
   onApplyAllCandidates: () => void;
   resolvedLevelKeys: string[];
   resolvedLinkKeys: string[];
+  savedMeasurements: Drawing['manualMeasurements'];
   onAdoptLevelCandidate: (groupId: string, item: { pageNo: number; box: BoundingBox; text: string; value: string | null }) => void;
   onAdoptPlanSectionLink: (callout: string, linkId: string) => void;
+  onSaveDistanceMeasurement: (pageNo: number, points: [DrawingMeasurementPoint, DrawingMeasurementPoint]) => void;
+  onSavePolygonMeasurement: (pageNo: number, points: DrawingPolygonMeasurement['points']) => void;
 }
 
 export interface OcrReviewPanelHandle {
@@ -59,11 +74,16 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
   onApplyAllCandidates,
   resolvedLevelKeys,
   resolvedLinkKeys,
+  savedMeasurements,
   onAdoptLevelCandidate,
   onAdoptPlanSectionLink,
+  onSaveDistanceMeasurement,
+  onSavePolygonMeasurement,
 }: OcrReviewPanelProps, ref) {
   const [selectedPageNo, setSelectedPageNo] = useState(1);
   const [zoom, setZoom] = useState(0.45);
+  const [measurementMode, setMeasurementMode] = useState<DrawingMeasurementMode>('idle');
+  const [draftMeasurementPoints, setDraftMeasurementPoints] = useState<DrawingMeasurementPoint[]>([]);
   const [structuredFocusBox, setStructuredFocusBox] = useState<BoundingBox | null>(null);
   const [compareOverlays, setCompareOverlays] = useState<Array<{
     id: string;
@@ -101,9 +121,11 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
       setCompareOverlays([]);
       return;
     }
-    setSelectedPageNo(activeDrawing.pages[0]?.pageNo ?? 1);
-    setStructuredFocusBox(null);
-    setCompareOverlays([]);
+      setSelectedPageNo(activeDrawing.pages[0]?.pageNo ?? 1);
+      setStructuredFocusBox(null);
+      setCompareOverlays([]);
+      setMeasurementMode('idle');
+      setDraftMeasurementPoints([]);
   }, [activeDrawing?.id]);
 
   const activeCandidate = activeDrawing?.aiCandidates.find((candidate) => candidate.id === activeCandidateId) ?? null;
@@ -131,8 +153,51 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
   const activePage = activeDrawing?.pages.find((page) => page.pageNo === selectedPageNo) ?? null;
   const pageItems = activeDrawing ? derivePageItems(activeDrawing.ocrItems, selectedPageNo) : [];
   const pageCandidates = activeDrawing ? derivePageCandidates(activeDrawing.aiCandidates, selectedPageNo) : [];
+  const pageMeasurements = savedMeasurements.filter((measurement) => measurement.pageNo === selectedPageNo);
+  const latestMeasurements = [...pageMeasurements].slice(-4).reverse();
 
   const focusBox: BoundingBox | null = structuredFocusBox ?? activeCandidate?.sourceBox ?? activeItem?.box ?? null;
+
+  const handleCanvasPointAdd = (point: DrawingMeasurementPoint) => {
+    setStructuredFocusBox(null);
+    setCompareOverlays([]);
+    onSelectCandidate(null);
+    onSelectOcrItem(null);
+
+    setDraftMeasurementPoints((prev) => {
+      if (measurementMode === 'distance') {
+        if (prev.length >= 2) {
+          return [point];
+        }
+        return [...prev, point];
+      }
+      if (measurementMode === 'polygon') {
+        return [...prev, point];
+      }
+      return prev;
+    });
+  };
+
+  const handleActivateMeasurementMode = (mode: DrawingMeasurementMode) => {
+    setMeasurementMode((current) => (current === mode ? 'idle' : mode));
+    setDraftMeasurementPoints([]);
+    setStructuredFocusBox(null);
+    setCompareOverlays([]);
+  };
+
+  const handleSaveDistanceMeasurement = () => {
+    if (!activePage || draftMeasurementPoints.length < 2) return;
+    onSaveDistanceMeasurement(activePage.pageNo, [draftMeasurementPoints[0], draftMeasurementPoints[1]]);
+    setDraftMeasurementPoints([]);
+    setMeasurementMode('idle');
+  };
+
+  const handleSavePolygonMeasurement = () => {
+    if (!activePage || draftMeasurementPoints.length < 3) return;
+    onSavePolygonMeasurement(activePage.pageNo, draftMeasurementPoints);
+    setDraftMeasurementPoints([]);
+    setMeasurementMode('idle');
+  };
 
   return (
     <div ref={panelRef} className="flex h-full min-h-[720px] flex-col rounded-lg border border-slate-200 bg-white shadow-md">
@@ -243,6 +308,76 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
             </div>
           </div>
 
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2">
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => handleActivateMeasurementMode('distance')}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  measurementMode === 'distance'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                point-to-point 計測
+              </button>
+              <button
+                type="button"
+                onClick={() => handleActivateMeasurementMode('polygon')}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  measurementMode === 'polygon'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                polygon 面積計測
+              </button>
+              {measurementMode !== 'idle' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraftMeasurementPoints([]);
+                    setMeasurementMode('idle');
+                  }}
+                  className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  計測解除
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {measurementMode === 'distance' && (
+                <button
+                  type="button"
+                  onClick={handleSaveDistanceMeasurement}
+                  disabled={draftMeasurementPoints.length < 2}
+                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  距離計測を保存
+                </button>
+              )}
+              {measurementMode === 'polygon' && (
+                <button
+                  type="button"
+                  onClick={handleSavePolygonMeasurement}
+                  disabled={draftMeasurementPoints.length < 3}
+                  className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  面積計測を保存
+                </button>
+              )}
+            </div>
+          </div>
+
+          {measurementMode !== 'idle' && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+              {measurementMode === 'distance'
+                ? '図面上の 2 点を順番にクリックしてください。既に 2 点ある状態で再クリックすると、新しい計測を開始します。'
+                : '面積の外周点を順番にクリックしてください。3 点以上で保存できます。'}
+            </div>
+          )}
+
           {activeDrawing && activeDrawing.pages.length > 1 && (
             <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
               {activeDrawing.pages.map((page) => (
@@ -253,6 +388,7 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
                     setSelectedPageNo(page.pageNo);
                     onSelectOcrItem(null);
                     onSelectCandidate(null);
+                    setDraftMeasurementPoints([]);
                   }}
                   className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
                     page.pageNo === selectedPageNo
@@ -273,9 +409,43 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
               activeItemId={activeOcrItemId}
               focusBox={focusBox}
               compareOverlays={compareOverlays}
+              measurementMode={measurementMode}
+              draftMeasurementPoints={draftMeasurementPoints}
+              savedMeasurements={pageMeasurements}
               zoom={zoom}
               onSelectItem={onSelectOcrItem}
+              onCanvasPointAdd={handleCanvasPointAdd}
             />
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-white px-3 py-3">
+            <div className="text-sm font-semibold text-slate-800">手動計測</div>
+            <div className="mt-1 text-[11px] leading-5 text-slate-500">
+              point-to-point と polygon はページ実寸と図面縮尺が取れたときだけ m / m² へ換算します。取れない場合は px / px² で止めます。
+            </div>
+            <div className="mt-3 space-y-2">
+              {latestMeasurements.length === 0 ? (
+                <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  このページの保存済み計測はありません。
+                </div>
+              ) : latestMeasurements.map((measurement) => {
+                const measurementPage = activeDrawing?.pages.find((item) => item.pageNo === measurement.pageNo);
+                if (!measurementPage || !activeDrawing) return null;
+                const summary = measurement.measurementType === 'distance'
+                  ? describeDistanceMeasurement(measurement.pixelLength, measurementPage, activeDrawing.resolvedUnits)
+                  : describePolygonMeasurement(measurement.pixelArea, measurementPage, activeDrawing.resolvedUnits);
+                return (
+                  <div key={measurement.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-semibold text-slate-900">{measurement.name}</div>
+                      <div className="text-slate-500">{measurement.measurementType === 'distance' ? 'distance' : 'polygon'}</div>
+                    </div>
+                    <div className="mt-1">{summary.value}</div>
+                    <div className="mt-1 text-[11px] text-slate-500">{summary.note}</div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 

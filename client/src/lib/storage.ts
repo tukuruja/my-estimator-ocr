@@ -1,5 +1,5 @@
-import type { AppState, EstimateBlock, EstimateZone, Project } from './types';
-import { createDefaultBlock, createDefaultEstimateZone, createDefaultProject, createInitialAppState } from './types';
+import type { AppState, Drawing, EstimateBlock, EstimateZone, Project } from './types';
+import { createDefaultBlock, createDefaultDrawing, createDefaultEstimateZone, createDefaultProject, createInitialAppState } from './types';
 import { resolveAppApiUrl } from './api';
 import { getWorkspaceHeaders, getWorkspaceId } from './workspace';
 
@@ -90,10 +90,30 @@ function normalizeBlock(projectId: string, raw: unknown, index: number): Estimat
   };
 }
 
+function normalizeDrawing(projectId: string, raw: unknown, index: number): Drawing {
+  const source = isObject(raw) ? raw as Partial<Drawing> : {};
+  const fallback = createDefaultDrawing(projectId, source.name || `図面 ${index + 1}`);
+  return {
+    ...fallback,
+    ...source,
+    id: typeof source.id === 'string' ? source.id : fallback.id,
+    projectId,
+    pages: Array.isArray(source.pages) ? source.pages : [],
+    ocrItems: Array.isArray(source.ocrItems) ? source.ocrItems : [],
+    aiCandidates: Array.isArray(source.aiCandidates) ? source.aiCandidates : [],
+    workTypeCandidates: Array.isArray(source.workTypeCandidates) ? source.workTypeCandidates : [],
+    reviewQueue: Array.isArray(source.reviewQueue) ? source.reviewQueue : [],
+    manualResolutions: Array.isArray(source.manualResolutions) ? source.manualResolutions : [],
+    manualMeasurements: Array.isArray(source.manualMeasurements) ? source.manualMeasurements : [],
+  };
+}
+
 function normalizeProject(project: Project): Project {
   return {
     ...project,
-    drawings: Array.isArray(project.drawings) ? project.drawings : [],
+    drawings: Array.isArray(project.drawings)
+      ? project.drawings.map((drawing, index) => normalizeDrawing(project.id, drawing, index))
+      : [],
     blocks: Array.isArray(project.blocks)
       ? project.blocks.map((block, index) => normalizeBlock(project.id, block, index))
       : [createDefaultBlock(project.id, `${project.name} 見積 1`)],

@@ -33,7 +33,42 @@ export interface DrawingPage {
   imageUrl: string;
   width: number;
   height: number;
+  physicalWidthMm?: number | null;
+  physicalHeightMm?: number | null;
 }
+
+export interface DrawingMeasurementPoint {
+  x: number;
+  y: number;
+}
+
+export type DrawingMeasurementMode = 'idle' | 'distance' | 'polygon';
+
+export interface DrawingDistanceMeasurement {
+  id: string;
+  measurementType: 'distance';
+  pageNo: number;
+  name: string;
+  points: [DrawingMeasurementPoint, DrawingMeasurementPoint];
+  pixelLength: number;
+  realLength?: number | null;
+  unit: 'px' | 'm';
+  createdAt: string;
+}
+
+export interface DrawingPolygonMeasurement {
+  id: string;
+  measurementType: 'polygon';
+  pageNo: number;
+  name: string;
+  points: DrawingMeasurementPoint[];
+  pixelArea: number;
+  realArea?: number | null;
+  unit: 'px2' | 'm2';
+  createdAt: string;
+}
+
+export type DrawingManualMeasurement = DrawingDistanceMeasurement | DrawingPolygonMeasurement;
 
 export interface AICandidate {
   id: string;
@@ -222,6 +257,113 @@ export interface DrawingOcrStructured {
   skillSources: string[];
 }
 
+export interface DrawingCadStructuredPageAnalysis {
+  pageNo: number;
+  sourceMediaType: string;
+  preferredPipeline: string;
+  roles: string[];
+  callouts: string[];
+  dimensionCount: number;
+  levelCount: number;
+  physicalWidthMm?: number | null;
+  physicalHeightMm?: number | null;
+}
+
+export interface DrawingCadStructuredClassification {
+  pageNo: number;
+  discipline: string;
+  sheetTypeName: string;
+  workTypeCandidates: Array<{
+    blockType: BlockType;
+    label: string;
+    confidence: number;
+  }>;
+}
+
+export interface DrawingCadStructuredEntity {
+  id: string;
+  pageNo: number;
+  entityType: 'dimension' | 'level' | 'callout' | 'table' | 'ocr_note';
+  sourceText: string;
+  bbox: BoundingBox;
+  confidence: number;
+}
+
+export interface DrawingCadStructuredObject {
+  id: string;
+  pageNo: number;
+  objectType: 'legend_term' | 'normalized_term' | 'sheet_link' | 'business_document';
+  label: string;
+  canonical?: string | null;
+  confidence: number;
+}
+
+export interface DrawingCadStructuredDimension {
+  id: string;
+  pageNo: number;
+  label: string;
+  sourceText: string;
+  bbox: BoundingBox;
+  values: string[];
+  unit: string;
+  status: 'confirmed' | 'estimated' | 'blocked';
+  confidence: number;
+}
+
+export interface DrawingCadStructuredQuantity {
+  fieldName: string;
+  label: string;
+  value?: string | number;
+  confidence: number;
+  sourceText: string;
+  sourcePage: number;
+  sourceBox: BoundingBox;
+  requiresReview: boolean;
+}
+
+export interface DrawingCadStructuredCondition {
+  id: string;
+  severity: OcrReviewQueueSeverity;
+  title: string;
+  detail: string;
+}
+
+export interface DrawingCadStructuredOutput {
+  documentSummary: {
+    fileName: string;
+    fileType: DrawingFileType;
+    pageCount: number;
+    drawingNo?: string | null;
+    drawingTitle?: string | null;
+    businessDocument: boolean;
+  };
+  pageAnalysis: DrawingCadStructuredPageAnalysis[];
+  drawingClassification: DrawingCadStructuredClassification[];
+  scaleAndUnits: {
+    sheetScale?: string | null;
+    sheetScaleRatio?: number | null;
+    lengthUnit: string;
+    elevationUnit: string;
+    viewDirection: string;
+  };
+  cadEntities: DrawingCadStructuredEntity[];
+  objects: DrawingCadStructuredObject[];
+  dimensions: DrawingCadStructuredDimension[];
+  quantities: DrawingCadStructuredQuantity[];
+  constructionConditions: DrawingCadStructuredCondition[];
+  warnings: string[];
+  stopReasons: string[];
+  confidenceReview: {
+    reviewRequired: boolean;
+    unresolvedCount: number;
+    ambiguousCount: number;
+    lowConfidenceCount: number;
+  };
+  missingInformation: string[];
+  recommendedNextInputs: string[];
+  humanSummary: string;
+}
+
 export interface PriceMasterItem {
   id: string;
   masterType: MasterType;
@@ -338,8 +480,10 @@ export interface Drawing {
   resolvedUnits?: DrawingResolvedUnits;
   legendResolution?: DrawingLegendResolution;
   ocrStructured?: DrawingOcrStructured;
+  cadStructured?: DrawingCadStructuredOutput;
   reviewQueue: OcrReviewQueueItem[];
   manualResolutions: DrawingManualResolution[];
+  manualMeasurements: DrawingManualMeasurement[];
   uploadedAt: string;
   lastParsedAt?: string;
   lastError?: string;
@@ -581,6 +725,7 @@ export interface ParseDrawingResponse {
   resolvedUnits?: DrawingResolvedUnits;
   legendResolution?: DrawingLegendResolution;
   ocrStructured?: DrawingOcrStructured;
+  cadStructured?: DrawingCadStructuredOutput;
   reviewQueue?: Array<{
     queue: string;
     severity: OcrReviewQueueSeverity;
@@ -602,12 +747,16 @@ export interface ParseDrawingResponse {
     width: number;
     height: number;
     page: number;
+    physicalWidthMm?: number | null;
+    physicalHeightMm?: number | null;
   };
   pagePreviews?: Array<{
     imageUrl: string;
     width: number;
     height: number;
     page: number;
+    physicalWidthMm?: number | null;
+    physicalHeightMm?: number | null;
   }>;
   debug?: Record<string, unknown>;
 }
@@ -713,6 +862,7 @@ export function createDefaultDrawing(projectId: string, name: string = '図面�
     workTypeCandidates: [],
     reviewQueue: [],
     manualResolutions: [],
+    manualMeasurements: [],
     uploadedAt: new Date().toISOString(),
   };
 }

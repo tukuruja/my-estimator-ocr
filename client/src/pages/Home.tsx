@@ -10,6 +10,14 @@ import type { OcrReviewPanelHandle } from '@/components/OcrReviewPanel';
 import DocumentPanel from '@/components/DocumentPanel';
 import { calculate } from '@/lib/calculations';
 import {
+  buildDistanceMeasurementName,
+  buildPolygonMeasurementName,
+  convertAreaPixelsToSquareMeters,
+  convertDistancePixelsToMeters,
+  calculateDistancePixels,
+  calculatePolygonAreaPixels,
+} from '@/lib/ocrMeasurements';
+import {
   fetchMasters,
   fetchOcrLearningEntries,
   generateReport,
@@ -33,6 +41,7 @@ import {
   type BoundingBox,
   type Drawing,
   type DrawingManualResolution,
+  type DrawingMeasurementPoint,
   type EstimateBlock,
   type EstimateZone,
   type GeneratedReportBundle,
@@ -387,6 +396,8 @@ function buildDrawingFromParseResponse(
       imageUrl: preview.imageUrl,
       width: preview.width,
       height: preview.height,
+      physicalWidthMm: preview.physicalWidthMm ?? null,
+      physicalHeightMm: preview.physicalHeightMm ?? null,
     })),
     ocrItems: payload.ocrItems.map((item) => ({
       id: crypto.randomUUID(),
@@ -401,6 +412,7 @@ function buildDrawingFromParseResponse(
     sheetClassification: payload.sheetClassification,
     resolvedUnits: payload.resolvedUnits,
     legendResolution: payload.legendResolution,
+    cadStructured: payload.cadStructured,
     ocrStructured: payload.ocrStructured ? {
       ...payload.ocrStructured,
       learningMatches: payload.ocrStructured.learningMatches ?? [],
@@ -425,6 +437,7 @@ function buildDrawingFromParseResponse(
       fieldName: item.fieldName,
     })),
     manualResolutions: [],
+    manualMeasurements: [],
     uploadedAt: new Date().toISOString(),
     lastParsedAt: new Date().toISOString(),
   };
@@ -1212,6 +1225,80 @@ export default function Home({ preferredBlockType }: HomeProps) {
     toast.success(`「${callout}」の図面リンクを採用し、review queue を閉じました。`);
   }, [activeDrawing, activeProject, replaceActiveProject]);
 
+  const handleSaveDistanceMeasurement = useCallback((pageNo: number, points: [DrawingMeasurementPoint, DrawingMeasurementPoint]) => {
+    if (!activeProject || !activeDrawing) return;
+    const page = activeDrawing.pages.find((item) => item.pageNo === pageNo);
+    if (!page) return;
+
+    const pixelLength = calculateDistancePixels(points[0], points[1]);
+    const realLength = convertDistancePixelsToMeters(pixelLength, page, activeDrawing.resolvedUnits);
+    const nextCount = (activeDrawing.manualMeasurements?.filter((item) => item.measurementType === 'distance').length ?? 0) + 1;
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => (
+        drawing.id !== activeDrawing.id
+          ? drawing
+          : {
+              ...drawing,
+              manualMeasurements: [
+                ...(drawing.manualMeasurements ?? []),
+                {
+                  id: crypto.randomUUID(),
+                  measurementType: 'distance',
+                  pageNo,
+                  name: buildDistanceMeasurementName(nextCount),
+                  points,
+                  pixelLength,
+                  realLength,
+                  unit: realLength !== null ? 'm' : 'px',
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            }
+      )),
+    }));
+
+    toast.success(realLength !== null ? `距離を ${realLength} m で保存しました。` : `距離を ${pixelLength.toFixed(1)} px で保存しました。`);
+  }, [activeDrawing, activeProject, replaceActiveProject]);
+
+  const handleSavePolygonMeasurement = useCallback((pageNo: number, points: DrawingMeasurementPoint[]) => {
+    if (!activeProject || !activeDrawing) return;
+    const page = activeDrawing.pages.find((item) => item.pageNo === pageNo);
+    if (!page) return;
+
+    const pixelArea = calculatePolygonAreaPixels(points);
+    const realArea = convertAreaPixelsToSquareMeters(pixelArea, page, activeDrawing.resolvedUnits);
+    const nextCount = (activeDrawing.manualMeasurements?.filter((item) => item.measurementType === 'polygon').length ?? 0) + 1;
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => (
+        drawing.id !== activeDrawing.id
+          ? drawing
+          : {
+              ...drawing,
+              manualMeasurements: [
+                ...(drawing.manualMeasurements ?? []),
+                {
+                  id: crypto.randomUUID(),
+                  measurementType: 'polygon',
+                  pageNo,
+                  name: buildPolygonMeasurementName(nextCount),
+                  points,
+                  pixelArea,
+                  realArea,
+                  unit: realArea !== null ? 'm2' : 'px2',
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            }
+      )),
+    }));
+
+    toast.success(realArea !== null ? `面積を ${realArea} m² で保存しました。` : `面積を ${pixelArea.toFixed(1)} px² で保存しました。`);
+  }, [activeDrawing, activeProject, replaceActiveProject]);
+
   if (!initialized || !appState || !activeProject || !activeBlock || !result) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -1342,8 +1429,11 @@ export default function Home({ preferredBlockType }: HomeProps) {
             onApplyAllCandidates={handleApplyAllCandidates}
             resolvedLevelKeys={resolvedLevelKeys}
             resolvedLinkKeys={resolvedLinkKeys}
+            savedMeasurements={activeDrawing?.manualMeasurements ?? []}
             onAdoptLevelCandidate={handleRequestAdoptLevelCandidate}
             onAdoptPlanSectionLink={handleAdoptPlanSectionLink}
+            onSaveDistanceMeasurement={handleSaveDistanceMeasurement}
+            onSavePolygonMeasurement={handleSavePolygonMeasurement}
           />
 
           <div className="space-y-2">
@@ -1384,6 +1474,17 @@ export default function Home({ preferredBlockType }: HomeProps) {
                       <div className="mt-1">watchlist: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.ambiguousCandidates.length}</span></div>
                       <div className="mt-1">図面リンク: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.planSectionLinks.length}</span></div>
                       <div className="mt-1">再利用学習: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.learningMatches?.length ?? 0}</span></div>
+                    </>
+                  )}
+                  {activeDrawing.cadStructured && (
+                    <>
+                      <div className="mt-2 border-t border-slate-200 pt-2 font-semibold text-slate-800">CAD-oriented structured output</div>
+                      <div className="mt-1">entity: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.cadEntities.length}</span></div>
+                      <div className="mt-1">object: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.objects.length}</span></div>
+                      <div className="mt-1">dimension: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.dimensions.length}</span></div>
+                      <div className="mt-1">quantity: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.quantities.length}</span></div>
+                      <div className="mt-1">missing: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.missingInformation.length}</span></div>
+                      <div className="mt-1">manual measurement: <span className="font-semibold text-slate-900">{activeDrawing.manualMeasurements?.length ?? 0}</span></div>
                     </>
                   )}
                 </div>
