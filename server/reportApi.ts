@@ -2,8 +2,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { calculate } from '../client/src/lib/calculations';
 import { generateReportBundle } from '../client/src/lib/reporting';
-import type { Drawing, EstimateBlock, Project, ReportGenerationRequest } from '../client/src/lib/types';
+import type { ChangeEstimatePdfRequest, Drawing, EstimateBlock, Project, ReportGenerationRequest } from '../client/src/lib/types';
 import { getProjectById } from './appStateStore';
+import { generateChangeEstimatePdfDocument } from './changeEstimatePdf';
 import { listMasterItems } from './masterStore';
 
 type Next = (err?: unknown) => void;
@@ -66,15 +67,35 @@ async function resolveContext(req: IncomingMessage, body: ReportGenerationReques
 
 async function handleReportApi(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const pathname = new URL(req.url || '/', 'http://localhost').pathname;
-  if ((req.method || 'GET') !== 'POST' || pathname !== '/api/reports/generate') {
+  if ((req.method || 'GET') !== 'POST' || !['/api/reports/generate', '/api/reports/change-estimate.pdf'].includes(pathname)) {
     return false;
   }
 
-  const body = await readJsonBody<ReportGenerationRequest>(req);
+  const body = await readJsonBody<ReportGenerationRequest | ChangeEstimatePdfRequest>(req);
   const { project, block, drawing, effectiveDate } = await resolveContext(req, body);
   const masters = await listMasterItems({ effectiveDate });
   const result = calculate(block, { masters, effectiveDate });
   const bundle = generateReportBundle({ project, block, drawing, result });
+
+  if (pathname === '/api/reports/change-estimate.pdf') {
+    const pdfRequest = body as ChangeEstimatePdfRequest;
+    if (!pdfRequest.header?.issueDate || !pdfRequest.header?.recipientName || !pdfRequest.header?.constructionName || !pdfRequest.header?.changeReason) {
+      throw new Error('変更見積書PDFには発行日・宛名・工事名・変更理由が必要です。');
+    }
+
+    const pdfBytes = await generateChangeEstimatePdfDocument({
+      bundle,
+      header: pdfRequest.header,
+      projectName: project.name,
+      estimateName: block.name,
+    });
+
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`${project.name}_${block.name}_変更見積書.pdf`)}`);
+    res.end(Buffer.from(pdfBytes));
+    return true;
+  }
 
   sendJson(res, 200, { success: true, data: bundle });
   return true;

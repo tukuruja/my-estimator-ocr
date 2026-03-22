@@ -1,4 +1,5 @@
 import type {
+  ChangeEstimatePdfRequest,
   GeneratedReportBundle,
   OcrLearningContext,
   OcrLearningEntry,
@@ -298,6 +299,38 @@ export async function generateReport(request: ReportGenerationRequest): Promise<
       throw new Error('帳票データが返却されませんでした。');
     }
     return payload.data;
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {
+        throw new Error(getServerApiUnavailableMessage());
+      }
+      throw error;
+    }
+    throw new Error(getServerApiUnavailableMessage());
+  }
+}
+
+export async function generateChangeEstimatePdf(request: ChangeEstimatePdfRequest): Promise<Blob> {
+  try {
+    const response = await fetch(resolveAppApiUrl('/api/reports/change-estimate.pdf'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getWorkspaceHeaders(),
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, '変更見積書PDFの生成に失敗しました。'));
+    }
+
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!contentType.includes('application/pdf')) {
+      throw new Error('PDFデータが返却されませんでした。');
+    }
+
+    return await response.blob();
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {

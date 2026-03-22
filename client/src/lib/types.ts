@@ -622,6 +622,17 @@ export interface ReportGenerationRequest {
   drawing?: Drawing | null;
 }
 
+export interface ChangeEstimateReportHeader {
+  issueDate: string;
+  recipientName: string;
+  constructionName: string;
+  changeReason: string;
+}
+
+export interface ChangeEstimatePdfRequest extends ReportGenerationRequest {
+  header: ChangeEstimateReportHeader;
+}
+
 export interface OcrLearningContext {
   planSectionLinks: OcrLearningEntry[];
 }

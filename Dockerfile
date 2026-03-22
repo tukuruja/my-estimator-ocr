@@ -32,6 +32,7 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server/data/drawing-ocr-pack ./server-pack-data/drawing-ocr-pack
+COPY --from=build /app/server/assets/fonts ./server-assets/fonts
 
 EXPOSE 8080
 

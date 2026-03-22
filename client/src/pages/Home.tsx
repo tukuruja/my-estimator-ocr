@@ -1410,7 +1410,18 @@ export default function Home({ preferredBlockType }: HomeProps) {
                 {reportError}
               </div>
             )}
-            <DocumentPanel bundle={reportBundle} drawing={activeDrawing} projectName={activeProject.name} estimateName={activeBlock.name} />
+            <DocumentPanel
+              bundle={reportBundle}
+              drawing={activeDrawing}
+              projectName={activeProject.name}
+              estimateName={activeBlock.name}
+              reportRequest={{
+                project: activeProject,
+                block: activeBlock,
+                drawing: activeDrawing,
+                effectiveDate,
+              }}
+            />
           </div>
         </div>
       </div>

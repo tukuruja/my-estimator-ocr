@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react';
-import { Download, FileSpreadsheet, Printer, ShieldAlert } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
-import type { Drawing, GeneratedReportBundle, WorkTypeCandidate } from '@/lib/types';
-import { openChangeEstimatePrintView } from '@/lib/changeEstimatePrint';
+import type { ChangeEstimateReportHeader, Drawing, GeneratedReportBundle, ReportGenerationRequest, WorkTypeCandidate } from '@/lib/types';
+import { generateChangeEstimatePdf } from '@/lib/api';
 
 interface DocumentPanelProps {
   bundle: GeneratedReportBundle;
   drawing: Drawing | null;
   projectName: string;
   estimateName: string;
+  reportRequest: ReportGenerationRequest;
 }
 
 type TabKey = 'estimate' | 'change' | 'evidence' | 'review';
@@ -35,12 +36,47 @@ function WorkTypeBadge({ candidate }: { candidate: WorkTypeCandidate }) {
   );
 }
 
-export default function DocumentPanel({ bundle, drawing, projectName, estimateName }: DocumentPanelProps) {
+export default function DocumentPanel({ bundle, drawing, projectName, estimateName, reportRequest }: DocumentPanelProps) {
   const [tab, setTab] = useState<TabKey>('estimate');
+  const [header, setHeader] = useState<ChangeEstimateReportHeader>(() => ({
+    issueDate: new Date().toISOString().slice(0, 10),
+    recipientName: '',
+    constructionName: projectName,
+    changeReason: '',
+  }));
+  const [isPdfGenerating, setIsPdfGenerating] = useState(false);
   const workTypeCandidates = drawing?.workTypeCandidates ?? [];
 
   const filePrefix = useMemo(() => `${projectName || '案件'}_${estimateName || '見積'}`, [estimateName, projectName]);
-  const generatedAt = useMemo(() => new Date().toLocaleString('ja-JP'), []);
+
+  function updateHeader(field: keyof ChangeEstimateReportHeader, value: string) {
+    setHeader((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleGenerateChangeEstimatePdf() {
+    if (!header.issueDate.trim() || !header.recipientName.trim() || !header.constructionName.trim() || !header.changeReason.trim()) {
+      toast.error('発行日・宛名・工事名・変更理由を入力してください。');
+      return;
+    }
+
+    setIsPdfGenerating(true);
+    try {
+      const blob = await generateChangeEstimatePdf({
+        ...reportRequest,
+        header,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${filePrefix}_変更見積書.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '変更見積書PDFの生成に失敗しました。');
+    } finally {
+      setIsPdfGenerating(false);
+    }
+  }
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -155,29 +191,59 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
 
         {tab === 'change' && (
           <div>
+            <div className="mb-3 grid gap-3 rounded-md border border-cyan-200 bg-cyan-50 p-3 md:grid-cols-2">
+              <label className="space-y-1">
+                <div className="text-xs font-semibold text-slate-700">発行日</div>
+                <input
+                  type="date"
+                  value={header.issueDate}
+                  onChange={(event) => updateHeader('issueDate', event.target.value)}
+                  className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="space-y-1">
+                <div className="text-xs font-semibold text-slate-700">宛名</div>
+                <input
+                  type="text"
+                  value={header.recipientName}
+                  onChange={(event) => updateHeader('recipientName', event.target.value)}
+                  placeholder="例: 株式会社〇〇 御中"
+                  className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="space-y-1 md:col-span-2">
+                <div className="text-xs font-semibold text-slate-700">工事名</div>
+                <input
+                  type="text"
+                  value={header.constructionName}
+                  onChange={(event) => updateHeader('constructionName', event.target.value)}
+                  placeholder="例: D街区外構工事 変更見積"
+                  className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="space-y-1 md:col-span-2">
+                <div className="text-xs font-semibold text-slate-700">変更理由</div>
+                <textarea
+                  value={header.changeReason}
+                  onChange={(event) => updateHeader('changeReason', event.target.value)}
+                  placeholder="例: 他工種先行と仮復旧対応により、A棟前・共用通路の再段取りと追加数量が発生"
+                  rows={3}
+                  className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                />
+              </label>
+            </div>
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="text-xs leading-5 text-slate-600">
-                区画ごとの変更数量、再段取り、仮復旧、他工種調整、図面根拠、備考写真をまとめた専用帳票です。
+                区画ごとの変更数量、再段取り、仮復旧、他工種調整、図面根拠、備考写真をまとめた専用帳票です。PDF はサーバ側で固定レイアウト生成します。
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    try {
-                      openChangeEstimatePrintView({
-                        projectName,
-                        estimateName,
-                        generatedAt,
-                        rows: bundle.changeEstimateRows,
-                        totalAmount: bundle.summary.changeEstimateTotalAmount,
-                      });
-                    } catch (error) {
-                      toast.error(error instanceof Error ? error.message : 'PDF出力に失敗しました。');
-                    }
-                  }}
-                  className="inline-flex items-center gap-2 rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                  onClick={() => void handleGenerateChangeEstimatePdf()}
+                  disabled={isPdfGenerating || bundle.changeEstimateRows.length === 0}
+                  className="inline-flex items-center gap-2 rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                 >
-                  <Printer className="h-4 w-4" /> PDF出力
+                  <FileText className="h-4 w-4" /> {isPdfGenerating ? 'PDF生成中...' : 'PDF出力'}
                 </button>
                 <button
                   type="button"

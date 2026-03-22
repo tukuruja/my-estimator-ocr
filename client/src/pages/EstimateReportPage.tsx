@@ -130,7 +130,18 @@ export default function EstimateReportPage({ preferredBlockType }: EstimateRepor
           </div>
           {error && <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
         </div>
-        <DocumentPanel bundle={bundle} drawing={activeDrawing} projectName={activeProject.name} estimateName={activeBlock.name} />
+        <DocumentPanel
+          bundle={bundle}
+          drawing={activeDrawing}
+          projectName={activeProject.name}
+          estimateName={activeBlock.name}
+          reportRequest={{
+            project: activeProject,
+            block: activeBlock,
+            drawing: activeDrawing,
+            effectiveDate: new Date().toISOString().slice(0, 10),
+          }}
+        />
       </main>
     </div>
   );
