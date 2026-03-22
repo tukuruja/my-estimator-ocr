@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import type { OcrLearningEntry } from '../client/src/lib/types';
-import { listOcrLearningEntries, upsertOcrLearningEntry } from './ocrLearningStore';
+import { listProjectScopedOcrLearningEntries, upsertOcrLearningEntry } from './ocrLearningStore';
 
 type Next = (err?: unknown) => void;
 
@@ -35,13 +35,19 @@ function getPathname(req: IncomingMessage): string {
   return new URL(req.url || '/', 'http://localhost').pathname;
 }
 
+function getProjectId(req: IncomingMessage): string | undefined {
+  const projectId = new URL(req.url || '/', 'http://localhost').searchParams.get('projectId');
+  return projectId?.trim() ? projectId : undefined;
+}
+
 async function handleOcrLearningApi(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const pathname = getPathname(req);
   const method = req.method || 'GET';
   const workspaceId = getWorkspaceId(req);
+  const projectId = getProjectId(req);
 
   if (pathname === '/api/ocr-learning' && method === 'GET') {
-    const entries = await listOcrLearningEntries(workspaceId);
+    const entries = await listProjectScopedOcrLearningEntries(workspaceId, projectId);
     sendJson(res, 200, { success: true, data: { entries } });
     return true;
   }
@@ -53,8 +59,9 @@ async function handleOcrLearningApi(req: IncomingMessage, res: ServerResponse): 
       return true;
     }
 
-    const { state, entry } = await upsertOcrLearningEntry(workspaceId, {
+    const { entry } = await upsertOcrLearningEntry(workspaceId, {
       learningType: 'plan_section_link',
+      projectId: body.projectId,
       callout: body.callout,
       normalizedCallout: body.normalizedCallout,
       sourceRole: body.sourceRole,
@@ -66,8 +73,9 @@ async function handleOcrLearningApi(req: IncomingMessage, res: ServerResponse): 
       drawingNo: body.drawingNo,
       drawingTitle: body.drawingTitle,
     });
+    const entries = await listProjectScopedOcrLearningEntries(workspaceId, body.projectId);
 
-    sendJson(res, 200, { success: true, data: { entry, entries: state.entries } });
+    sendJson(res, 200, { success: true, data: { entry, entries } });
     return true;
   }
 

@@ -87,6 +87,41 @@ export default function CalculationResults({ result, block }: CalculationResults
             <ResultSection key={section.id} title={section.title} tone={section.tone} rows={section.metrics} />
           ))}
         </div>
+
+        {result.zoneBreakdowns.length > 0 && (
+          <div className="mt-3 overflow-hidden rounded border border-cyan-200 shadow-sm">
+            <div className="bg-cyan-600 px-2 py-1 text-xs font-bold text-white">区画別配賦</div>
+            <div className="bg-white">
+              <table className="w-full text-xs">
+                <thead className="bg-cyan-50 text-slate-600">
+                  <tr className="border-b border-cyan-100">
+                    <th className="px-2 py-2 text-left">区画名</th>
+                    <th className="px-2 py-2 text-right">数量</th>
+                    <th className="px-2 py-2 text-right">配賦率</th>
+                    <th className="px-2 py-2 text-right">再段取り</th>
+                    <th className="px-2 py-2 text-right">追加額</th>
+                    <th className="px-2 py-2 text-right">区画金額</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.zoneBreakdowns.map((zone) => (
+                    <tr key={zone.id} className="border-b border-slate-100 align-top last:border-b-0">
+                      <td className="px-2 py-2">
+                        <div className="font-semibold text-slate-900">{zone.name}</div>
+                        {zone.note && <div className="mt-1 text-[11px] text-slate-500">{zone.note}</div>}
+                      </td>
+                      <td className="px-2 py-2 text-right">{formatNumber(zone.primaryQuantity)}{zone.primaryUnit}</td>
+                      <td className="px-2 py-2 text-right">{formatNumber(zone.quantityShare)}%</td>
+                      <td className="px-2 py-2 text-right">{zone.remobilizationCount}回</td>
+                      <td className="px-2 py-2 text-right">{formatCurrency(zone.remobilizationAmount + zone.temporaryRestorationAmount + zone.coordinationAdjustmentAmount)}</td>
+                      <td className="px-2 py-2 text-right font-semibold">{formatCurrency(zone.totalAmount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

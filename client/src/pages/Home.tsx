@@ -24,6 +24,7 @@ import { canonicalizeMasterName, createSeedMasterItems } from '@/lib/masterData'
 import { buildLevelConflictGroups, groupPlanSectionLinksByCallout, isLevelWatchGroup } from '@/lib/ocrInsights';
 import {
   createDefaultBlock,
+  createDefaultEstimateZone,
   createDefaultProject,
   createInitialAppState,
   type AICandidate,
@@ -33,6 +34,7 @@ import {
   type Drawing,
   type DrawingManualResolution,
   type EstimateBlock,
+  type EstimateZone,
   type GeneratedReportBundle,
   type MasterType,
   type OcrLearningContext,
@@ -614,17 +616,6 @@ export default function Home({ preferredBlockType }: HomeProps) {
       }
     })();
 
-    void (async () => {
-      try {
-        const entries = await fetchOcrLearningEntries();
-        if (cancelled) return;
-        setOcrLearningEntries(entries);
-      } catch {
-        if (cancelled) return;
-        setOcrLearningEntries([]);
-      }
-    })();
-
     return () => {
       cancelled = true;
     };
@@ -706,6 +697,29 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const ocrLearningContext = useMemo<OcrLearningContext>(() => ({
     planSectionLinks: ocrLearningEntries,
   }), [ocrLearningEntries]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeProject?.id) {
+      setOcrLearningEntries([]);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const entries = await fetchOcrLearningEntries(activeProject.id);
+        if (cancelled) return;
+        setOcrLearningEntries(entries);
+      } catch {
+        if (cancelled) return;
+        setOcrLearningEntries([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject?.id]);
 
   useEffect(() => {
     if (!activeProject || !activeBlock) {
@@ -826,6 +840,51 @@ export default function Home({ preferredBlockType }: HomeProps) {
       }),
     }));
   }, [activeProject, activeBlock, replaceActiveProject]);
+
+  const handleZoneChange = useCallback((zoneId: string, field: keyof EstimateZone, value: string | number) => {
+    if (!activeProject || !activeBlock) return;
+    replaceActiveProject((project) => ({
+      ...project,
+      blocks: project.blocks.map((block) => {
+        if (block.id !== activeBlock.id) return block;
+        return {
+          ...block,
+          zones: block.zones.map((zone) => (
+            zone.id === zoneId
+              ? { ...zone, [field]: value }
+              : zone
+          )),
+        };
+      }),
+    }));
+  }, [activeProject, activeBlock, replaceActiveProject]);
+
+  const handleAddZone = useCallback(() => {
+    if (!activeProject || !activeBlock) return;
+    const defaultNames = ['A棟前', '共用通路', '駐車場', 'B棟前', 'エントランス前'];
+    const defaultName = defaultNames[activeBlock.zones.length] ?? `区画 ${activeBlock.zones.length + 1}`;
+    const nextZone = createDefaultEstimateZone(defaultName);
+    replaceActiveProject((project) => ({
+      ...project,
+      blocks: project.blocks.map((block) => (
+        block.id === activeBlock.id
+          ? { ...block, zones: [...block.zones, nextZone] }
+          : block
+      )),
+    }));
+  }, [activeBlock, activeProject, replaceActiveProject]);
+
+  const handleRemoveZone = useCallback((zoneId: string) => {
+    if (!activeProject || !activeBlock) return;
+    replaceActiveProject((project) => ({
+      ...project,
+      blocks: project.blocks.map((block) => (
+        block.id === activeBlock.id
+          ? { ...block, zones: block.zones.filter((zone) => zone.id !== zoneId) }
+          : block
+      )),
+    }));
+  }, [activeBlock, activeProject, replaceActiveProject]);
 
   const handleAddProject = useCallback(() => {
     const defaultName = `案件 ${appState ? appState.projects.length + 1 : 1}`;
@@ -1127,6 +1186,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
     }));
 
     void savePlanSectionLearning({
+      projectId: activeProject.id,
       callout,
       normalizedCallout: normalizeCalloutForLearning(callout),
       sourceRole: selectedLink.sourceRole,
@@ -1251,7 +1311,13 @@ export default function Home({ preferredBlockType }: HomeProps) {
       <div className="flex-1 overflow-auto p-2">
         <div className="grid gap-2 2xl:grid-cols-[420px_minmax(0,1.35fr)_minmax(0,1fr)]">
           <div className="min-h-[720px] overflow-auto">
-            <InputForm block={activeBlock} onChange={handleFieldChange} />
+            <InputForm
+              block={activeBlock}
+              onChange={handleFieldChange}
+              onZoneChange={handleZoneChange}
+              onAddZone={handleAddZone}
+              onRemoveZone={handleRemoveZone}
+            />
           </div>
 
           <OcrReviewPanel

@@ -89,6 +89,7 @@ export interface DrawingManualResolution {
 
 export interface OcrLearningEntry {
   id: string;
+  projectId?: string;
   learningType: 'plan_section_link';
   callout: string;
   normalizedCallout: string;
@@ -329,6 +330,16 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface EstimateZone {
+  id: string;
+  name: string;
+  primaryQuantity: number;
+  remobilizationCount: number;
+  temporaryRestorationRate: number;
+  coordinationAdjustmentRate: number;
+  note: string;
+}
+
 export interface EstimateBlock {
   id: string;
   projectId: string;
@@ -365,6 +376,7 @@ export interface EstimateBlock {
   remobilizationCount: number;
   temporaryRestorationRate: number;
   coordinationAdjustmentRate: number;
+  zones: EstimateZone[];
   requiresReviewFields: string[];
   appliedCandidateIds: string[];
 }
@@ -409,6 +421,24 @@ export interface CalculationEvidence {
   sourcePage: string | null;
   reason: string;
   requiresReview: boolean;
+}
+
+export interface CalculationZoneBreakdown {
+  id: string;
+  name: string;
+  primaryQuantity: number;
+  primaryUnit: string;
+  quantityShare: number;
+  baseAmount: number;
+  remobilizationCount: number;
+  remobilizationAmount: number;
+  temporaryRestorationRate: number;
+  temporaryRestorationQuantity: number;
+  temporaryRestorationAmount: number;
+  coordinationAdjustmentRate: number;
+  coordinationAdjustmentAmount: number;
+  totalAmount: number;
+  note: string;
 }
 
 export interface CalculationResult {
@@ -474,6 +504,7 @@ export interface CalculationResult {
   detailSections: CalculationDetailSection[];
   lineItems: CalculationLineItem[];
   priceEvidence: CalculationEvidence[];
+  zoneBreakdowns: CalculationZoneBreakdown[];
 }
 
 export interface AppState {
@@ -562,6 +593,18 @@ export interface OcrLearningContext {
   planSectionLinks: OcrLearningEntry[];
 }
 
+export function createDefaultEstimateZone(name: string = 'A棟前'): EstimateZone {
+  return {
+    id: crypto.randomUUID(),
+    name,
+    primaryQuantity: 0,
+    remobilizationCount: 0,
+    temporaryRestorationRate: 0,
+    coordinationAdjustmentRate: 0,
+    note: '',
+  };
+}
+
 export function createDefaultBlock(projectId: string, name: string = '新規見積', drawingId: string | null = null): EstimateBlock {
   return {
     id: crypto.randomUUID(),
@@ -599,6 +642,7 @@ export function createDefaultBlock(projectId: string, name: string = '新規見�
     remobilizationCount: 0,
     temporaryRestorationRate: 0,
     coordinationAdjustmentRate: 0,
+    zones: [],
     requiresReviewFields: [],
     appliedCandidateIds: [],
   };

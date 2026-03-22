@@ -94,15 +94,25 @@ function createEntryKey(entry: Pick<OcrLearningEntry, 'learningType' | 'normaliz
   return `${entry.learningType}:${entry.normalizedCallout}:${entry.sourceRole}:${entry.targetRole}`;
 }
 
+function createScopedEntryKey(entry: Pick<OcrLearningEntry, 'projectId' | 'learningType' | 'normalizedCallout' | 'sourceRole' | 'targetRole'>): string {
+  return `${entry.projectId ?? '__global__'}:${createEntryKey(entry)}`;
+}
+
+export async function listProjectScopedOcrLearningEntries(workspaceId: string, projectId?: string): Promise<OcrLearningEntry[]> {
+  const entries = await listOcrLearningEntries(workspaceId);
+  if (!projectId) return entries;
+  return entries.filter((entry) => !entry.projectId || entry.projectId === projectId);
+}
+
 export async function upsertOcrLearningEntry(
   workspaceId: string,
   input: Omit<OcrLearningEntry, 'id' | 'adoptionCount' | 'createdAt' | 'updatedAt'>,
 ): Promise<{ state: PersistedOcrLearningState; entry: OcrLearningEntry }> {
   const state = await readOcrLearningState(workspaceId);
-  const inputKey = createEntryKey(input);
+  const inputKey = createScopedEntryKey(input);
   const now = new Date().toISOString();
 
-  const existingIndex = state.entries.findIndex((entry) => createEntryKey(entry) === inputKey);
+  const existingIndex = state.entries.findIndex((entry) => createScopedEntryKey(entry) === inputKey);
   let nextEntry: OcrLearningEntry;
   const nextEntries = [...state.entries];
 

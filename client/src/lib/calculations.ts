@@ -5,7 +5,9 @@ import type {
   CalculationLineItem,
   CalculationMetricRow,
   CalculationResult,
+  CalculationZoneBreakdown,
   EstimateBlock,
+  EstimateZone,
   MasterType,
   PriceMasterItem,
 } from './types';
@@ -42,6 +44,11 @@ interface RateContext {
   concreteUnitPrice: number;
   productUnitPrice: number;
   cementUnitPrice: number;
+}
+
+interface ZoneResolvedValues {
+  temporaryRestorationRate: number;
+  coordinationAdjustmentRate: number;
 }
 
 type MachineLike = PriceMasterItem | { price: number; capacity: number } | null;
@@ -132,6 +139,7 @@ function emptyResult(workType: BlockType, displayName: string, primaryUnit: stri
     detailSections: [],
     lineItems: [],
     priceEvidence: [],
+    zoneBreakdowns: [],
   };
 }
 
@@ -311,6 +319,26 @@ function finalizeCommonResult(result: CalculationResult): CalculationResult {
   };
 }
 
+function computeSplitSetupUnitPrice(block: EstimateBlock, context: RateContext): number {
+  return Math.round(
+    context.laborCost * (block.blockType === 'pavement' ? 1.4 : 1.8)
+      + (context.machineUnitPrice > 0 ? context.machineUnitPrice * 0.35 : 0),
+  );
+}
+
+function resolveZoneRates(zone: EstimateZone, block: EstimateBlock): ZoneResolvedValues {
+  return {
+    temporaryRestorationRate: Math.max(
+      0,
+      zone.temporaryRestorationRate > 0 ? zone.temporaryRestorationRate : (block.temporaryRestorationRate || 0),
+    ) / 100,
+    coordinationAdjustmentRate: Math.max(
+      0,
+      zone.coordinationAdjustmentRate > 0 ? zone.coordinationAdjustmentRate : (block.coordinationAdjustmentRate || 0),
+    ) / 100,
+  };
+}
+
 function applyPhasedExecutionAdjustments(
   result: CalculationResult,
   block: EstimateBlock,
@@ -327,10 +355,7 @@ function applyPhasedExecutionAdjustments(
   }
 
   const averagePhaseQuantity = phaseCount > 0 ? round2(result.primaryQuantity / phaseCount) : 0;
-  const setupUnitPrice = Math.round(
-    context.laborCost * (block.blockType === 'pavement' ? 1.4 : 1.8)
-      + (context.machineUnitPrice > 0 ? context.machineUnitPrice * 0.35 : 0),
-  );
+  const setupUnitPrice = computeSplitSetupUnitPrice(block, context);
   const setupAmount = remobilizationCount * setupUnitPrice;
   const temporaryRestorationQuantity = round2(result.primaryQuantity * temporaryRestorationRate);
   const temporaryRestorationUnitPrice = Math.round((result.totalAmountPerPrimaryUnit || 0) * 0.35);
@@ -443,6 +468,90 @@ function applyPhasedExecutionAdjustments(
     lineItems: [...result.lineItems, ...extraLineItems],
     priceEvidence: [...result.priceEvidence, ...extraEvidence],
   });
+}
+
+function applyZoneBreakdowns(
+  result: CalculationResult,
+  block: EstimateBlock,
+  context: RateContext,
+): CalculationResult {
+  const zones = Array.isArray(block.zones) ? block.zones.filter((zone) => zone.name.trim()) : [];
+  if (zones.length === 0) {
+    return result;
+  }
+
+  const normalizedZones = zones.map((zone) => ({
+    ...zone,
+    primaryQuantity: Math.max(0, Number(zone.primaryQuantity || 0)),
+    remobilizationCount: Math.max(0, Math.round(zone.remobilizationCount || 0)),
+  }));
+  const totalZoneQuantity = normalizedZones.reduce((sum, zone) => sum + zone.primaryQuantity, 0);
+  const hasQuantities = totalZoneQuantity > 0;
+  const quantityBase = hasQuantities ? totalZoneQuantity : normalizedZones.length;
+  const baseRate = result.primaryQuantity > 0 ? result.totalAmount / result.primaryQuantity : 0;
+  const setupUnitPrice = computeSplitSetupUnitPrice(block, context);
+  const temporaryRestorationUnitPrice = Math.round((result.totalAmountPerPrimaryUnit || 0) * 0.35);
+
+  let allocatedBaseAmount = 0;
+  const zoneBreakdowns: CalculationZoneBreakdown[] = normalizedZones.map((zone, index) => {
+    const shareRaw = hasQuantities
+      ? zone.primaryQuantity / quantityBase
+      : 1 / normalizedZones.length;
+    const baseAmount = index === normalizedZones.length - 1
+      ? Math.max(0, result.totalAmount - allocatedBaseAmount)
+      : Math.round(result.totalAmount * shareRaw);
+    allocatedBaseAmount += baseAmount;
+
+    const rates = resolveZoneRates(zone, block);
+    const temporaryRestorationQuantity = round2(zone.primaryQuantity * rates.temporaryRestorationRate);
+    const temporaryRestorationAmount = Math.round(temporaryRestorationQuantity * temporaryRestorationUnitPrice);
+    const remobilizationAmount = Math.round(zone.remobilizationCount * setupUnitPrice);
+    const coordinationAdjustmentAmount = Math.round(baseAmount * rates.coordinationAdjustmentRate);
+    const totalAmount = baseAmount + remobilizationAmount + temporaryRestorationAmount + coordinationAdjustmentAmount;
+
+    return {
+      id: zone.id,
+      name: zone.name,
+      primaryQuantity: round2(zone.primaryQuantity),
+      primaryUnit: result.primaryUnit,
+      quantityShare: round2(shareRaw * 100),
+      baseAmount,
+      remobilizationCount: zone.remobilizationCount,
+      remobilizationAmount,
+      temporaryRestorationRate: round2(rates.temporaryRestorationRate * 100),
+      temporaryRestorationQuantity,
+      temporaryRestorationAmount,
+      coordinationAdjustmentRate: round2(rates.coordinationAdjustmentRate * 100),
+      coordinationAdjustmentAmount,
+      totalAmount,
+      note: zone.note,
+    };
+  });
+
+  const coverageRate = result.primaryQuantity > 0 && totalZoneQuantity > 0
+    ? round2((totalZoneQuantity / result.primaryQuantity) * 100)
+    : 0;
+
+  return {
+    ...result,
+    detailSections: [
+      ...result.detailSections,
+      {
+        id: `${result.workType}-zone-breakdowns`,
+        title: '区画別見積',
+        tone: 'bg-cyan-600',
+        metrics: [
+          metric('区画数', zoneBreakdowns.length, '区画'),
+          metric('区画数量合計', totalZoneQuantity, result.primaryUnit),
+          metric('総数量に対する配分率', coverageRate, '%'),
+          metric('再段取り追加額', zoneBreakdowns.reduce((sum, zone) => sum + zone.remobilizationAmount, 0), '円', 'currency'),
+          metric('仮復旧追加額', zoneBreakdowns.reduce((sum, zone) => sum + zone.temporaryRestorationAmount, 0), '円', 'currency'),
+          metric('他工種調整追加額', zoneBreakdowns.reduce((sum, zone) => sum + zone.coordinationAdjustmentAmount, 0), '円', 'currency'),
+        ],
+      },
+    ],
+    zoneBreakdowns,
+  };
 }
 
 function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
@@ -558,7 +667,7 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
     createMasterEvidence('secondary.install', '二次製品据付', null, { masterType: 'input', masterName: '送料（画面入力）', adoptedUnitPrice: shippingCost, unit: '式', reason: '運搬費は案件条件依存のため入力値を採用', requiresReview: shippingCost <= 0 }),
   ];
 
-  return applyPhasedExecutionAdjustments(finalizeCommonResult({
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
     ...result,
     excavationWidth: round2(excavationWidth),
     excavationHeight: round2(excavationHeight),
@@ -624,7 +733,7 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
     ],
     lineItems,
     priceEvidence,
-  }), block, context);
+  }), block, context), block, context);
 }
 
 function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
@@ -701,7 +810,7 @@ function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptio
     createMasterEvidence('retaining.body', '擁壁躯体工', null, { masterType: 'input', masterName: '型枠単価（画面入力）', adoptedUnitPrice: block.formworkCost || 0, unit: 'm2', reason: '型枠材は案件条件依存のため入力値を採用', requiresReview: (block.formworkCost || 0) <= 0 }),
   ];
 
-  return applyPhasedExecutionAdjustments(finalizeCommonResult({
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
     ...result,
     excavationWidth: round2(excavationWidth),
     excavationHeight: round2(excavationHeight),
@@ -754,7 +863,7 @@ function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptio
     ],
     lineItems,
     priceEvidence,
-  }), block, context);
+  }), block, context), block, context);
 }
 
 function calculatePavement(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
@@ -811,7 +920,7 @@ function calculatePavement(block: EstimateBlock, options?: CalculationOptions): 
     createMasterEvidence('pavement.subbase', '下層路盤工', laborMaster, { masterType: 'input', masterName: '標準労務単価', adoptedUnitPrice: laborCost, unit: '人日', reason: '転圧・敷均し労務費の根拠', requiresReview: laborCost <= 0 }),
   ].filter((item) => item.adoptedUnitPrice > 0 || item.requiresReview);
 
-  return applyPhasedExecutionAdjustments(finalizeCommonResult({
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
     ...result,
     excavationWidth: round2(width),
     excavationHeight: round2(surfaceThickness + binderThickness + baseThickness + subBaseThickness),
@@ -831,7 +940,7 @@ function calculatePavement(block: EstimateBlock, options?: CalculationOptions): 
     ],
     lineItems,
     priceEvidence,
-  }), block, context);
+  }), block, context), block, context);
 }
 
 function calculateDemolition(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
@@ -873,7 +982,7 @@ function calculateDemolition(block: EstimateBlock, options?: CalculationOptions)
     createMasterEvidence('demolition.disposal', '殻運搬・処分', disposalMaster, { masterType: 'input', masterName: isConcrete ? 'Co殻処分' : 'As殻処分', adoptedUnitPrice: disposalUnitPrice, unit: 'm3', reason: '産廃処分単価の根拠', requiresReview: !disposalMaster }),
   ];
 
-  return applyPhasedExecutionAdjustments(finalizeCommonResult({
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
     ...result,
     excavationWidth: round2(width),
     excavationHeight: round2(thickness),
@@ -888,7 +997,7 @@ function calculateDemolition(block: EstimateBlock, options?: CalculationOptions)
     ],
     lineItems,
     priceEvidence,
-  }), block, context);
+  }), block, context), block, context);
 }
 
 export function calculate(block: EstimateBlock, options?: CalculationOptions): CalculationResult {

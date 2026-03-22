@@ -202,8 +202,12 @@ export async function parseDrawing(
   }
 }
 
-export async function fetchOcrLearningEntries(): Promise<OcrLearningEntry[]> {
-  const response = await fetch(resolveAppApiUrl('/api/ocr-learning'), {
+export async function fetchOcrLearningEntries(projectId?: string): Promise<OcrLearningEntry[]> {
+  const params = new URLSearchParams();
+  if (projectId) {
+    params.set('projectId', projectId);
+  }
+  const response = await fetch(resolveAppApiUrl(`/api/ocr-learning${params.toString() ? `?${params.toString()}` : ''}`), {
     headers: getWorkspaceHeaders(),
   });
   await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), 'OCR 学習データの取得に失敗しました。');

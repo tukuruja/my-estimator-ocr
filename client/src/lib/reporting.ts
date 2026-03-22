@@ -42,6 +42,35 @@ function resolveSourceSummary(drawing: Drawing | null): string {
   return `${drawing.fileName || drawing.name} / OCR確認済み`;
 }
 
+function buildZoneCoverageIssues(block: EstimateBlock, result: CalculationResult): ReviewIssue[] {
+  const zones = Array.isArray(block.zones) ? block.zones.filter((zone) => zone.name.trim()) : [];
+  if (zones.length === 0) return [];
+
+  const totalZoneQuantity = zones.reduce((sum, zone) => sum + Math.max(0, Number(zone.primaryQuantity || 0)), 0);
+  if (result.primaryQuantity <= 0 || totalZoneQuantity <= 0) {
+    return [
+      createReviewIssue({
+        severity: 'warning',
+        title: '区画別数量未設定',
+        detail: '区画名はありますが、区画別主数量が未入力です。変更見積に使う数量を入れてください。',
+        fieldName: 'zones',
+      }),
+    ];
+  }
+
+  const ratio = totalZoneQuantity / result.primaryQuantity;
+  if (Math.abs(1 - ratio) <= 0.05) return [];
+
+  return [
+    createReviewIssue({
+      severity: 'warning',
+      title: '区画別数量と総数量が不一致',
+      detail: `区画数量合計 ${totalZoneQuantity.toFixed(2)}${result.primaryUnit} が、総数量 ${result.primaryQuantity.toFixed(2)}${result.primaryUnit} と一致していません。`,
+      fieldName: 'zones',
+    }),
+  ];
+}
+
 function buildRequiredFieldIssues(block: EstimateBlock): ReviewIssue[] {
   const issues: ReviewIssue[] = [];
 
@@ -109,6 +138,19 @@ export function generateReportBundle({ project, block, drawing, result }: Report
     sourceSummary,
   }));
 
+  const zoneRows = result.zoneBreakdowns.map((zone) => createEstimateRow({
+    section: '区画別配賦',
+    itemName: zone.name,
+    specification: `${result.displayName} / ${zone.primaryQuantity}${zone.primaryUnit} / 配賦${zone.quantityShare}%`,
+    quantity: zone.primaryQuantity,
+    unit: zone.primaryUnit,
+    unitPrice: zone.primaryQuantity > 0 ? Math.round(zone.totalAmount / zone.primaryQuantity) : zone.totalAmount,
+    amount: zone.totalAmount,
+    remarks: `参考配賦。再段取り${zone.remobilizationCount}回 / 仮復旧${zone.temporaryRestorationRate}% / 他工種調整${zone.coordinationAdjustmentRate}%${zone.note ? ` / ${zone.note}` : ''}`,
+    sourceSummary,
+  }));
+
+  const allEstimateRows = [...estimateRows, ...zoneRows];
   const estimateRowByKey = new Map(result.lineItems.map((lineItem, index) => [lineItem.key, estimateRows[index]]));
 
   const evidenceRows = result.priceEvidence.map((evidence) => {
@@ -137,6 +179,7 @@ export function generateReportBundle({ project, block, drawing, result }: Report
   }
 
   reviewIssues.push(...buildRequiredFieldIssues(block));
+  reviewIssues.push(...buildZoneCoverageIssues(block, result));
 
   for (const fieldName of block.requiresReviewFields) {
     reviewIssues.push(createReviewIssue({
@@ -165,12 +208,12 @@ export function generateReportBundle({ project, block, drawing, result }: Report
   }
 
   return {
-    estimateRows,
+    estimateRows: allEstimateRows,
     unitPriceEvidenceRows: evidenceRows,
     reviewIssues,
     summary: {
       totalAmount: Math.round(result.totalAmount),
-      totalRows: estimateRows.length,
+      totalRows: allEstimateRows.length,
       requiresReviewCount: reviewIssues.length,
     },
   };

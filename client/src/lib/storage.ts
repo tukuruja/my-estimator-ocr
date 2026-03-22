@@ -1,5 +1,5 @@
-import type { AppState, EstimateBlock, Project } from './types';
-import { createDefaultBlock, createDefaultProject, createInitialAppState } from './types';
+import type { AppState, EstimateBlock, EstimateZone, Project } from './types';
+import { createDefaultBlock, createDefaultEstimateZone, createDefaultProject, createInitialAppState } from './types';
 import { resolveAppApiUrl } from './api';
 import { getWorkspaceHeaders, getWorkspaceId } from './workspace';
 
@@ -29,6 +29,50 @@ function workspaceStorageKey(baseKey: string): string {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function normalizeZone(raw: unknown, index: number): EstimateZone {
+  const fallback = createDefaultEstimateZone(`区画 ${index + 1}`);
+  if (!isObject(raw)) {
+    return fallback;
+  }
+
+  return {
+    ...fallback,
+    ...raw,
+    id: typeof raw.id === 'string' ? raw.id : fallback.id,
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : fallback.name,
+    primaryQuantity: typeof raw.primaryQuantity === 'number' ? raw.primaryQuantity : fallback.primaryQuantity,
+    remobilizationCount: typeof raw.remobilizationCount === 'number' ? raw.remobilizationCount : fallback.remobilizationCount,
+    temporaryRestorationRate: typeof raw.temporaryRestorationRate === 'number' ? raw.temporaryRestorationRate : fallback.temporaryRestorationRate,
+    coordinationAdjustmentRate: typeof raw.coordinationAdjustmentRate === 'number' ? raw.coordinationAdjustmentRate : fallback.coordinationAdjustmentRate,
+    note: typeof raw.note === 'string' ? raw.note : fallback.note,
+  };
+}
+
+function normalizeBlock(projectId: string, raw: unknown, index: number): EstimateBlock {
+  const source = isObject(raw) ? raw as Partial<EstimateBlock> : {};
+  const fallback = createDefaultBlock(projectId, source.name || `見積 ${index + 1}`);
+  return {
+    ...fallback,
+    ...source,
+    id: typeof source.id === 'string' ? source.id : fallback.id,
+    projectId,
+    drawingId: typeof source.drawingId === 'string' ? source.drawingId : source.drawingId === null ? null : fallback.drawingId,
+    requiresReviewFields: Array.isArray(source.requiresReviewFields) ? source.requiresReviewFields : [],
+    appliedCandidateIds: Array.isArray(source.appliedCandidateIds) ? source.appliedCandidateIds : [],
+    zones: Array.isArray(source.zones) ? source.zones.map((zone, zoneIndex) => normalizeZone(zone, zoneIndex)) : [],
+  };
+}
+
+function normalizeProject(project: Project): Project {
+  return {
+    ...project,
+    drawings: Array.isArray(project.drawings) ? project.drawings : [],
+    blocks: Array.isArray(project.blocks)
+      ? project.blocks.map((block, index) => normalizeBlock(project.id, block, index))
+      : [createDefaultBlock(project.id, `${project.name} 見積 1`)],
+  };
 }
 
 function migrateLegacyData(raw: Record<string, unknown>): AppState {
@@ -70,7 +114,9 @@ function normalizeState(raw: unknown): AppState {
     return migrateLegacyData(raw);
   }
 
-  const projects = raw.projects.length > 0 ? (raw.projects as Project[]) : createInitialAppState().projects;
+  const projects = raw.projects.length > 0
+    ? (raw.projects as Project[]).map((project) => normalizeProject(project))
+    : createInitialAppState().projects;
   const activeProjectId = typeof raw.activeProjectId === 'string' ? raw.activeProjectId : projects[0]?.id;
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
   const activeBlockId = typeof raw.activeBlockId === 'string'

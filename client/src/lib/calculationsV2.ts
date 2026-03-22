@@ -670,5 +670,6 @@ export function calculateV2(block: EstimateBlockV2): CalculationResultV2 {
     detailSections:                [],
     lineItems:                     [],
     priceEvidence:                 [],
+    zoneBreakdowns:                [],
   };
 }

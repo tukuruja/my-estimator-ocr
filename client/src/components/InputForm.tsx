@@ -1,4 +1,4 @@
-import { type EstimateBlock } from '@/lib/types';
+import { type EstimateBlock, type EstimateZone } from '@/lib/types';
 import { getWorkTypeLabel, WORK_TYPE_OPTIONS } from '@/lib/workTypes';
 import {
   secondaryProducts,
@@ -14,6 +14,9 @@ import {
 interface InputFormProps {
   block: EstimateBlock;
   onChange: (field: keyof EstimateBlock, value: string | number) => void;
+  onZoneChange: (zoneId: string, field: keyof EstimateZone, value: string | number) => void;
+  onAddZone: () => void;
+  onRemoveZone: (zoneId: string) => void;
 }
 
 function SectionHeader({ title, color, emoji }: { title: string; color: string; emoji: string }) {
@@ -324,7 +327,74 @@ function SplitExecutionFields({ block, onChange }: Pick<InputFormProps, 'block' 
   );
 }
 
-export default function InputForm({ block, onChange }: InputFormProps) {
+function ZoneBreakdownFields({ block, onZoneChange, onAddZone, onRemoveZone }: Pick<InputFormProps, 'block' | 'onZoneChange' | 'onAddZone' | 'onRemoveZone'>) {
+  return (
+    <div className="overflow-hidden rounded-md border border-cyan-300">
+      <SectionHeader title="区画別見積" color="bg-cyan-600" emoji="🗂" />
+      <div className="space-y-3 bg-cyan-50 p-3">
+        <div className="rounded-md border border-cyan-200 bg-white px-3 py-2 text-[11px] leading-5 text-slate-600">
+          集合住宅外構では、`A棟前 / 共用通路 / 駐車場` のように区画ごとへ主数量を分けて持つと、他業者都合の追加・変更見積がしやすくなります。区画数量は明細に `区画別配賦` として出ます。
+        </div>
+
+        {block.zones.length === 0 && (
+          <div className="rounded-md border border-dashed border-cyan-300 bg-white px-3 py-4 text-sm text-slate-500">
+            まだ区画はありません。先行引渡しや分割施工がある場合だけ追加してください。
+          </div>
+        )}
+
+        {block.zones.map((zone, index) => (
+          <div key={zone.id} className="rounded-md border border-cyan-200 bg-white p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-semibold text-slate-800">区画 {index + 1}</div>
+                <div className="text-[11px] text-slate-500">例: A棟前、共用通路、駐車場、ゴミ置場まわり</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemoveZone(zone.id)}
+                className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+              >
+                区画削除
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="区画名" hint="変更見積でも同じ名前を使います。" className="col-span-2">
+                <TextInput value={zone.name} onChange={(value) => onZoneChange(zone.id, 'name', value)} placeholder="例: A棟前" />
+              </FormField>
+              <FormField label="区画主数量" unit={block.blockType === 'pavement' || block.blockType === 'demolition' ? 'm²' : 'm'} hint="この区画に該当する延長または面積です。">
+                <NumberInput value={zone.primaryQuantity} onChange={(value) => onZoneChange(zone.id, 'primaryQuantity', Math.max(0, value))} />
+              </FormField>
+              <FormField label="再段取り回数" unit="回" hint="この区画で個別に増える再搬入回数です。">
+                <NumberInput value={zone.remobilizationCount} onChange={(value) => onZoneChange(zone.id, 'remobilizationCount', Math.max(0, Math.round(value)))} />
+              </FormField>
+              <FormField label="仮復旧率" unit="%" hint="共用通路などで一時開放が必要な割合です。">
+                <NumberInput value={zone.temporaryRestorationRate} onChange={(value) => onZoneChange(zone.id, 'temporaryRestorationRate', Math.max(0, value))} />
+              </FormField>
+              <FormField label="他工種調整率" unit="%" hint="設備・植栽・建築引渡し待ちの補正です。">
+                <NumberInput value={zone.coordinationAdjustmentRate} onChange={(value) => onZoneChange(zone.id, 'coordinationAdjustmentRate', Math.max(0, value))} />
+              </FormField>
+              <FormField label="備考" hint="追加変更の理由や他者都合を書き残します。" className="col-span-2">
+                <TextInput value={zone.note} onChange={(value) => onZoneChange(zone.id, 'note', value)} placeholder="例: 設備配管先行後に再着手" />
+              </FormField>
+            </div>
+          </div>
+        ))}
+
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onAddZone}
+            className="rounded-md bg-cyan-600 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-700"
+          >
+            区画を追加
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function InputForm({ block, onChange, onZoneChange, onAddZone, onRemoveZone }: InputFormProps) {
   const productName = block.secondaryProduct || 'まだ選択していません';
 
   return (
@@ -353,6 +423,7 @@ export default function InputForm({ block, onChange }: InputFormProps) {
         </div>
 
         <SplitExecutionFields block={block} onChange={onChange} />
+        <ZoneBreakdownFields block={block} onZoneChange={onZoneChange} onAddZone={onAddZone} onRemoveZone={onRemoveZone} />
         <CommonPricingFields block={block} onChange={onChange} />
       </div>
     </div>
