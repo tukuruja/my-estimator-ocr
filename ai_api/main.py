@@ -117,6 +117,194 @@ app.mount("/files", StaticFiles(directory=str(STORAGE_DIR)), name="files")
 
 ocr_engine = RapidOCR()
 
+# ─── Google Cloud Vision OCR 設定 ────────────────────────────────────────────
+# GEMINI_API_KEY と同一の Google Cloud プロジェクトで Vision API を有効にすると
+# 自動的に高精度モードに切り替わります。
+# RapidOCR はフォールバックとして引き続き使用されます。
+GCV_API_KEY: str = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GCV_API_KEY", "")
+GCV_ENABLED: bool = os.environ.get("GCV_ENABLED", "true").lower() != "false" and bool(GCV_API_KEY)
+_GCV_API_AVAILABLE: bool | None = None  # None=未チェック, True=利用可, False=利用不可
+
+
+def _check_gcv_availability() -> bool:
+    """GCVが有効かどうかをチェックし、結果をキャッシュする。"""
+    global _GCV_API_AVAILABLE
+    if _GCV_API_AVAILABLE is not None:
+        return _GCV_API_AVAILABLE
+    if not GCV_ENABLED:
+        _GCV_API_AVAILABLE = False
+        return False
+    # 1x1ピクセルの白画像で疎通確認
+    import base64
+    import urllib.error
+    import urllib.request
+
+    tiny_b64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9Q"
+        "DwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    payload = json.dumps({
+        "requests": [{
+            "image": {"content": tiny_b64},
+            "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
+        }]
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f"https://vision.googleapis.com/v1/images:annotate?key={GCV_API_KEY}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        error = (data.get("responses") or [{}])[0].get("error")
+        if error and error.get("code") in (403, 401, 400):
+            print(f"[OCR] Google Cloud Vision API 無効: {error.get('message', '')}")
+            _GCV_API_AVAILABLE = False
+        else:
+            print("[OCR] Google Cloud Vision API 利用可能 → 高精度モードで起動")
+            _GCV_API_AVAILABLE = True
+    except Exception as exc:
+        print(f"[OCR] Google Cloud Vision API 疎通確認失敗: {exc}")
+        _GCV_API_AVAILABLE = False
+    return _GCV_API_AVAILABLE
+
+
+def preprocess_for_construction_drawing(image: Image.Image) -> tuple[Image.Image, float]:
+    """
+    建設図面専用の画像前処理。
+    - 短辺が 1800px 未満の場合はアップスケール（GCV の文字認識精度向上）
+    - コントラストが低い場合（スキャン品質不足）はコントラスト強調
+    - シャープニングで寸法数値・注記の輪郭を強調
+    戻り値: (処理済み画像, スケール係数)
+    """
+    from PIL import ImageEnhance, ImageFilter
+
+    # 1. アップスケール: GCV は大きい画像の方が精度が高い
+    min_side = min(image.width, image.height)
+    if min_side < 1800:
+        scale = 1800.0 / min_side
+        new_w = int(image.width * scale)
+        new_h = int(image.height * scale)
+        image = image.resize((new_w, new_h), Image.LANCZOS)
+    else:
+        scale = 1.0
+
+    # 2. グレースケール変換 → 建設図面の細線/ハッチングへの干渉を低減
+    gray = image.convert("L")
+
+    # 3. コントラスト自動強調（低コントラストのスキャン図面対策）
+    stat = ImageStat.Stat(gray)
+    if stat.stddev[0] < 55:
+        gray = ImageEnhance.Contrast(gray).enhance(2.2)
+    elif stat.stddev[0] < 80:
+        gray = ImageEnhance.Contrast(gray).enhance(1.5)
+
+    # 4. シャープネス強化（微細な寸法文字を鮮明化）
+    gray = gray.filter(ImageFilter.SHARPEN)
+    gray = gray.filter(ImageFilter.SHARPEN)
+
+    return gray.convert("RGB"), scale
+
+
+def run_gcv_ocr_on_page(image: Image.Image, page_no: int) -> list[dict[str, Any]]:
+    """
+    Google Cloud Vision API (DOCUMENT_TEXT_DETECTION) で建設図面を高精度 OCR。
+    - 日本語ヒント (languageHints: ["ja"]) を付与し、漢字・数字の認識精度を最大化
+    - API 利用不可の場合は空リストを返し、RapidOCR にフォールバック
+    - ボックス座標はオリジナル画像座標系に変換して返す
+    """
+    import base64
+    import urllib.error
+    import urllib.request
+
+    if not _check_gcv_availability():
+        return []
+
+    processed, scale = preprocess_for_construction_drawing(image)
+
+    buf = io.BytesIO()
+    processed.save(buf, format="JPEG", quality=92)
+    content_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    payload = json.dumps({
+        "requests": [{
+            "image": {"content": content_b64},
+            "features": [{"type": "DOCUMENT_TEXT_DETECTION", "maxResults": 50}],
+            "imageContext": {
+                "languageHints": ["ja", "ja-Latn"],
+            },
+        }]
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            f"https://vision.googleapis.com/v1/images:annotate?key={GCV_API_KEY}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            result = json.loads(resp.read().decode())
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        print(f"[OCR] GCV ネットワークエラー p{page_no}: {exc}")
+        return []
+
+    annotation = (result.get("responses") or [{}])[0]
+    error = annotation.get("error")
+    if error:
+        print(f"[OCR] GCV APIエラー p{page_no}: {error.get('message', error)}")
+        return []
+
+    full_text = annotation.get("fullTextAnnotation") or {}
+    items: list[dict[str, Any]] = []
+
+    for gcp_page in full_text.get("pages", []):
+        for block in gcp_page.get("blocks", []):
+            for paragraph in block.get("paragraphs", []):
+                words = paragraph.get("words", [])
+                if not words:
+                    continue
+
+                # 段落内の全単語を結合してテキストを復元
+                parts: list[str] = []
+                scores: list[float] = []
+                all_vertices: list[tuple[float, float]] = []
+
+                for word in words:
+                    word_text = "".join(
+                        sym.get("text", "") for sym in word.get("symbols", [])
+                    )
+                    if not word_text.strip():
+                        continue
+                    parts.append(word_text)
+                    scores.append(float(word.get("confidence", 0.9)))
+                    for v in (word.get("boundingBox") or {}).get("vertices", []):
+                        all_vertices.append((float(v.get("x", 0)), float(v.get("y", 0))))
+
+                if not parts or not all_vertices:
+                    continue
+
+                para_text = "".join(parts)
+                avg_score = sum(scores) / len(scores) if scores else 0.9
+
+                # オリジナル座標系に変換（アップスケール分を除去）
+                xs = [v[0] / scale for v in all_vertices]
+                ys = [v[1] / scale for v in all_vertices]
+                x0, x1 = min(xs), max(xs)
+                y0, y1 = min(ys), max(ys)
+                # flatten_box 互換の 8 値形式 (4 コーナー)
+                box = [x0, y0, x1, y0, x1, y1, x0, y1]
+
+                items.append({
+                    "text": para_text,
+                    "score": round(avg_score, 4),
+                    "box": box,
+                    "page": page_no,
+                })
+
+    return items
+
+
 FIELD_LABELS = {
     "secondaryProduct": "対象名",
     "distance": "施工延長",
@@ -579,6 +767,11 @@ def load_image_pages(file_bytes: bytes) -> list[Image.Image]:
 
 
 def run_ocr_on_page(image: Image.Image, page_no: int) -> list[dict[str, Any]]:
+    # --- GCV (Google Cloud Vision) を優先エンジンとして使用 ---
+    gcv_items = run_gcv_ocr_on_page(image, page_no)
+    if gcv_items:
+        return gcv_items
+    # --- フォールバック: RapidOCR ---
     raw_result = ocr_engine(np.array(image.convert("RGB")))
     items: list[dict[str, Any]] = []
 
