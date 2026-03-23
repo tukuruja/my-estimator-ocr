@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderKanban, Plus, Workflow } from 'lucide-react';
 import Header from '@/components/Header';
 import EstimateList from '@/components/EstimateList';
+import StepIndicator, { type WorkflowStep } from '@/components/StepIndicator';
+import GmailInboxPanel from '@/components/GmailInboxPanel';
 import InputForm from '@/components/InputForm';
 import CalculationResults from '@/components/CalculationResults';
 import SaveBar from '@/components/SaveBar';
@@ -58,6 +60,7 @@ import {
   type Project,
 } from '@/lib/types';
 import { loadData, saveData } from '@/lib/storage';
+import { getWorkspaceId } from '@/lib/workspace';
 import { getWorkTypeLabel } from '@/lib/workTypes';
 import { buildProjectWorkbookAudit } from '@/lib/workbookAudit';
 import type { EstimationLogicRunResponse } from '@shared/estimationLogic';
@@ -1315,6 +1318,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const [logicRunError, setLogicRunError] = useState<string | null>(null);
   const [isLogicRunning, setIsLogicRunning] = useState(false);
   const [ocrLearningEntries, setOcrLearningEntries] = useState<OcrLearningEntry[]>([]);
+  const [showGmailPanel, setShowGmailPanel] = useState(false);
   const [pendingLevelAdoption, setPendingLevelAdoption] = useState<{
     groupId: string;
     item: { pageNo: number; box: BoundingBox; text: string; value: string | null };
@@ -2157,6 +2161,68 @@ export default function Home({ preferredBlockType }: HomeProps) {
       </div>
 
       <div className="px-2 pt-2">
+        {/* ─── 作業フロー Step Indicator ─────────────────────────────────── */}
+        {(() => {
+          const hasDrawings = activeProject.drawings.length > 0;
+          const hasBlocks = activeProject.blocks.length > 0;
+          const hasReport = (reportBundle.estimateRows?.length ?? 0) > 0;
+
+          const completedSteps: WorkflowStep[] = [];
+          let currentStep: WorkflowStep = 1;
+
+          // STEP 1: Gmail受信は完了とみなす（案件が登録されていれば）
+          if (activeProject.clientName || activeProject.siteName) {
+            completedSteps.push(1);
+            currentStep = 2;
+          }
+          // STEP 2: OCR解析
+          if (hasDrawings) {
+            completedSteps.push(2);
+            currentStep = 3;
+          }
+          // STEP 3: 見積入力
+          if (hasBlocks) {
+            completedSteps.push(3);
+            currentStep = 4;
+          }
+          // STEP 4: 帳票出力
+          if (hasReport) {
+            completedSteps.push(4);
+            currentStep = 4;
+          }
+
+          return (
+            <div className="mb-2 space-y-2">
+              <StepIndicator
+                currentStep={currentStep}
+                completedSteps={completedSteps}
+                onGmailClick={() => setShowGmailPanel((prev) => !prev)}
+              />
+              {showGmailPanel && (
+                <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="text-sm font-semibold text-slate-800">Gmail 受信トレイ — 案件自動登録</div>
+                    <button
+                      type="button"
+                      onClick={() => setShowGmailPanel(false)}
+                      className="text-xs text-slate-500 hover:text-slate-700"
+                    >
+                      ✕ 閉じる
+                    </button>
+                  </div>
+                  <GmailInboxPanel
+                    workspaceId={getWorkspaceId()}
+                    onProjectCreated={(_projectId, projectName) => {
+                      setShowGmailPanel(false);
+                      alert(`案件「${projectName}」を登録しました。画面を更新して確認してください。`);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div>
@@ -2176,10 +2242,11 @@ export default function Home({ preferredBlockType }: HomeProps) {
                 </label>
               </div>
             </div>
-            <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-1">
-              <GuideStep step="STEP 1" title="工種別見積を選ぶ" description="二次製品・擁壁・舗装・撤去のどれを見積るか選びます。" />
-              <GuideStep step="STEP 2" title="図面を OCR 解析" description="クリックすると OCR 画面へ移動し、PDF または画像の選択を開きます。" onActivate={handleActivateStep2} />
-              <GuideStep step="STEP 3" title="候補を確認して帳票化" description="根拠 bbox を見ながら候補を反映し、見積書・単価根拠表・要確認一覧を生成します。" />
+            <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-1">
+              <GuideStep step="STEP 1" title="Gmail 案件受信" description="上部の「Gmail受信」ボタンから未読メールを取得し、案件を自動登録します。" onActivate={() => setShowGmailPanel(true)} />
+              <GuideStep step="STEP 2" title="工種別見積を選ぶ" description="二次製品・擁壁・舗装・撤去のどれを見積るか選びます。" />
+              <GuideStep step="STEP 3" title="図面を OCR 解析" description="クリックすると OCR 画面へ移動し、PDF または画像の選択を開きます。" onActivate={handleActivateStep2} />
+              <GuideStep step="STEP 4" title="候補を確認して帳票化" description="根拠 bbox を見ながら候補を反映し、見積書・単価根拠表・要確認一覧を生成します。" />
             </div>
           </div>
         </div>

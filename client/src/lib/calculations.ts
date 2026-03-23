@@ -21,6 +21,7 @@ import {
   workabilityFactors,
   getFourHourExcavationCoefficient,
   getPouringWorkers,
+  getLooseningFactor,
 } from './priceData';
 import { createSeedMasterItems, findMasterByName } from './masterData';
 
@@ -592,9 +593,12 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
   const selectedFactor = workabilityFactors.find((item) => item.name === block.workabilityFactor);
   const workabilityFactorValue = selectedFactor?.value || 1;
 
+  // ほぐし係数L: 地盤条件から取得（空文字の場合はデフォルト砂質土 1.25）
+  const soilL = getLooseningFactor(block.groundCondition || '');
+
   const excavationWidth = productWidth + 0.4;
   const excavationHeight = currentHeight - plannedHeight + productHeight + crushedStoneThickness + baseThickness;
-  const excavationVolume = excavationWidth * excavationHeight * distance * 1.25;
+  const excavationVolume = excavationWidth * excavationHeight * distance * soilL;
   const fourHourExcavation = context.machineCapacity > 0
     ? getFourHourExcavationCoefficient(context.machineCapacity) * context.machineCapacity
     : 0;
@@ -604,7 +608,8 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
   const machineAmount = excavationDays * context.machineUnitPrice * 2;
   const excavationConstructionAmount = (excavationWorkers * laborCost) + machineAmount;
 
-  const backfillVolume = distance * productWidth * productHeight * 1.25;
+  // 埋め戻し量＝（掘削断面積 − 製品断面積）× 延長 × ほぐし係数L
+  const backfillVolume = (excavationWidth * excavationHeight - productWidth * productHeight) * distance * soilL;
   const backfillDays = fourHourExcavation > 0 ? Math.ceil(backfillVolume / fourHourExcavation) : 0;
   const backfillWorkers = distance > 0 ? 1 + Math.floor(backfillVolume / 2) : 0;
   const backfillLaborCost = distance > 0 ? backfillWorkers * laborCost : 0;
@@ -612,9 +617,11 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
   const soilRemovalVolume = Math.max(excavationVolume - backfillVolume, 0);
   const soilRemovalDays = fourHourExcavation > 0 ? Math.ceil(soilRemovalVolume / fourHourExcavation) : 0;
   const dumpCount = context.dumpCapacity > 0 ? Math.ceil(soilRemovalVolume / context.dumpCapacity) : 0;
-  const regularDumpCount = fourHourExcavation > 0 ? Math.ceil(dumpCount / Math.max(fourHourExcavation / 2, 1)) : 0;
+  // 常用ダンプ台数＝1日に必要な台数（延べ台数÷搬出日数）。fourHourExcavation÷2 で割るのは次元不整合
+  const regularDumpCount = soilRemovalDays > 0 && context.dumpCapacity > 0 ? Math.ceil(dumpCount / soilRemovalDays) : 0;
   const regularDumpUnitPrice = context.machineUnitPrice * 2;
-  const soilRemovalAmount = (soilRemovalDays * dumpCount * context.dumpVehicleUnitPrice)
+  // 残土搬出金額＝常用ダンプ日当 × 台数 × 日数 + 常用ダンプ機械費 + 労務費
+  const soilRemovalAmount = (regularDumpCount * context.dumpVehicleUnitPrice * soilRemovalDays)
     + (regularDumpCount * regularDumpUnitPrice)
     + (soilRemovalDays * laborCost);
 
@@ -637,7 +644,9 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
     : 0;
 
   const mortar = baseWidth * distance * 0.02 * stages;
-  const sand = mortar * productLengthValue;
+  // 砂量＝モルタル × 0.75（1:3配合でセメント:砂=1:3 → 砂が体積の約75%）
+  // ※ mortar × productLengthValue は m³ × m = m⁴ となり次元不整合
+  const sand = mortar * 0.75;
   const sandAmount = sand * sandCost;
   const cement = Math.ceil(mortar * 0.3 * 1.6 * 1000 / 25);
   const cementAmount = cement * context.cementUnitPrice;
@@ -763,9 +772,14 @@ function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptio
   const laborCost = context.laborCost;
   const wallTypeFactor = /重力/.test(block.secondaryProduct) ? 0.65 : /逆T/i.test(block.secondaryProduct) ? 0.38 : /L型/i.test(block.secondaryProduct) ? 0.34 : 0.45;
 
+  // ほぐし係数L: 擁壁工はデフォルト1.2（やや硬質地盤）。地盤条件指定がある場合はそちらを優先
+  const soilL = block.groundCondition
+    ? getLooseningFactor(block.groundCondition)
+    : 1.20;
+
   const excavationWidth = baseWidth + 1.0;
   const excavationHeight = wallHeight + baseThickness + stoneThickness;
-  const excavationVolume = excavationWidth * excavationHeight * length * 1.2;
+  const excavationVolume = excavationWidth * excavationHeight * length * soilL;
   const fourHourExcavation = context.machineCapacity > 0 ? getFourHourExcavationCoefficient(context.machineCapacity) * context.machineCapacity : 0;
   const excavationDays = fourHourExcavation > 0 ? Math.ceil(excavationVolume / fourHourExcavation) : 0;
   const excavationDailyWorkers = length > 0 ? Math.ceil(length / 20) + 2 : 0;
@@ -797,9 +811,11 @@ function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptio
   const soilRemovalVolume = Math.max(excavationVolume - backfillVolume, 0);
   const soilRemovalDays = fourHourExcavation > 0 ? Math.ceil(soilRemovalVolume / fourHourExcavation) : 0;
   const dumpCount = context.dumpCapacity > 0 ? Math.ceil(soilRemovalVolume / context.dumpCapacity) : 0;
-  const regularDumpCount = fourHourExcavation > 0 ? Math.ceil(dumpCount / Math.max(fourHourExcavation / 2, 1)) : 0;
+  // 常用ダンプ台数＝1日に必要な台数（延べ台数÷搬出日数）
+  const regularDumpCount = soilRemovalDays > 0 && context.dumpCapacity > 0 ? Math.ceil(dumpCount / soilRemovalDays) : 0;
   const regularDumpUnitPrice = context.machineUnitPrice * 2;
-  const soilRemovalAmount = (soilRemovalDays * dumpCount * context.dumpVehicleUnitPrice)
+  // 残土搬出金額＝常用ダンプ日当 × 台数 × 日数 + 常用ダンプ機械費 + 労務費
+  const soilRemovalAmount = (regularDumpCount * context.dumpVehicleUnitPrice * soilRemovalDays)
     + (regularDumpCount * regularDumpUnitPrice)
     + (soilRemovalDays * laborCost);
 

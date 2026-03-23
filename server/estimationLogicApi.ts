@@ -168,10 +168,77 @@ async function runOpenAiExecution(
   };
 }
 
+// ─── Gemini API 実行 ──────────────────────────────────────────────────────────
+
+async function runGeminiExecution(
+  preview: Awaited<ReturnType<typeof buildPreviewResponse>>,
+  apiKey: string,
+  model: string,
+): Promise<{ execution: EstimationLogicExecution; responseId: string | null; refusal: string | null }> {
+  // OpenAI Responses API 形式のリクエストから system/user テキストを抽出
+  const req = preview.openAiResponsesRequest as {
+    input?: Array<{ role: string; content: Array<{ type: string; text: string }> }>;
+  };
+  const inputs = req.input ?? [];
+
+  const systemText = inputs
+    .filter((m) => m.role === 'system')
+    .flatMap((m) => m.content)
+    .map((c) => c.text)
+    .join('\n');
+
+  const userText = inputs
+    .filter((m) => m.role === 'user')
+    .flatMap((m) => m.content)
+    .map((c) => c.text)
+    .join('\n');
+
+  // Gemini generateContent リクエスト（JSON モード）
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const geminiBody = {
+    systemInstruction: { parts: [{ text: systemText }] },
+    contents: [{ role: 'user', parts: [{ text: userText }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.0,
+    },
+  };
+
+  const response = await fetch(geminiUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(geminiBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API が失敗しました: ${response.status} ${errorText}`);
+  }
+
+  const payload = await response.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+
+  const text = payload.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error('Gemini API から JSON 出力が返りませんでした。');
+  }
+
+  return {
+    execution: JSON.parse(text) as EstimationLogicExecution,
+    responseId: null,
+    refusal: null,
+  };
+}
+
+// ─── メイン実行関数 ───────────────────────────────────────────────────────────
+
 async function buildRunResponse(workspaceId: string, body: PreviewRequestBody): Promise<EstimationLogicRunResponse> {
   const preview = await buildPreviewResponse(body);
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const openAiKey = process.env.OPENAI_API_KEY?.trim();
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
   const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-mini';
+  const geminiModel = process.env.GEMINI_MODEL?.trim() || 'gemini-1.5-flash';
   const warnings: string[] = [];
 
   let execution = preview.execution;
@@ -180,8 +247,9 @@ async function buildRunResponse(workspaceId: string, body: PreviewRequestBody): 
   let refusal: string | null = null;
   let openAiResponsesRequest = preview.openAiResponsesRequest;
 
-  if (apiKey) {
-    const run = await runOpenAiExecution(preview, apiKey, model);
+  if (openAiKey) {
+    // OpenAI 優先
+    const run = await runOpenAiExecution(preview, openAiKey, model);
     execution = run.execution;
     responseId = run.responseId;
     refusal = run.refusal;
@@ -190,8 +258,20 @@ async function buildRunResponse(workspaceId: string, body: PreviewRequestBody): 
     if (refusal) {
       warnings.push(`OpenAI refusal: ${refusal}`);
     }
+  } else if (geminiKey) {
+    // Gemini フォールバック
+    try {
+      const run = await runGeminiExecution(preview, geminiKey, geminiModel);
+      execution = run.execution;
+      responseId = run.responseId;
+      refusal = run.refusal;
+      mode = 'openai'; // フロントエンド互換のため 'openai' を維持
+      warnings.push(`Gemini API (${geminiModel}) で見積ロジックを実行しました。`);
+    } catch (err) {
+      warnings.push(`Gemini API エラー: ${err instanceof Error ? err.message : String(err)} — フォールバックを使用します。`);
+    }
   } else {
-    warnings.push('OPENAI_API_KEY が未設定のため、deterministic fallback を返しています。');
+    warnings.push('OPENAI_API_KEY / GEMINI_API_KEY が未設定のため、deterministic fallback を返しています。');
   }
 
   const response: EstimationLogicRunResponse = {
@@ -201,7 +281,7 @@ async function buildRunResponse(workspaceId: string, body: PreviewRequestBody): 
     audit: {
       ...buildAuditBase(workspaceId, body),
       mode,
-      model: apiKey ? model : null,
+      model: (openAiKey || geminiKey) ? (openAiKey ? model : geminiModel) : null,
       responseId,
       refusal,
       warnings,

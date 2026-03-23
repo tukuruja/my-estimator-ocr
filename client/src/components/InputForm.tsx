@@ -9,6 +9,8 @@ import {
   pumpTrucks,
   productLengths,
   workabilityFactors,
+  groundConditions,
+  getLooseningFactor,
 } from '@/lib/priceData';
 
 interface InputFormProps {
@@ -352,6 +354,24 @@ function CommonPricingFields({ block, onChange }: Pick<InputFormProps, 'block' |
           </FormField>
           <FormField label="標準労務単価" unit="円/人日" hint="全工種で使う標準労務単価です。" className="col-span-2">
             <NumberInput value={block.laborCost} onChange={(value) => onChange('laborCost', value)} />
+          </FormField>
+          <FormField
+            label="地盤条件（ほぐし係数L）"
+            hint={`L=${getLooseningFactor(block.groundCondition || '').toFixed(2)}　土量換算係数。土質によって残土量・埋戻し量が変わります。`}
+            className="col-span-2"
+          >
+            <select
+              value={block.groundCondition || ''}
+              onChange={(e) => onChange('groundCondition', e.target.value)}
+              className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              <option value="">砂質土（標準）L=1.25</option>
+              {groundConditions.map((g) => (
+                <option key={g.name} value={g.name}>
+                  {g.name}　L={g.looseningFactor.toFixed(2)}　{g.description}
+                </option>
+              ))}
+            </select>
           </FormField>
         </div>
       </div>

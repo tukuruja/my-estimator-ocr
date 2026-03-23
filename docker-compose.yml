@@ -1,0 +1,92 @@
+version: '3.9'
+
+# =====================================================================
+# 建設統合見積システム — docker compose up で全サービス一括起動
+# =====================================================================
+# 起動コマンド:
+#   docker compose up --build
+#
+# 各サービスのURL:
+#   フロントエンド + Express API: http://localhost:3000
+#   OCR API (Python FastAPI):    http://localhost:8000
+#   earthwork API (codex):       http://localhost:8080  (オプション)
+#
+# 初回のみ .env ファイルを作成してください:
+#   cp .env.example .env
+# =====================================================================
+
+services:
+  # ─── フロントエンド + Express サーバー ────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: estimator-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - CORS_ALLOW_ORIGINS=http://localhost:3000,http://localhost:5173
+      # OCR APIのURL（app→ocr_api の通信は内部ネットワーク経由）
+      - OCR_API_URL=http://ocr_api:8000
+      # Gmail OAuth2 設定（.envファイルで管理すること。gitにコミット禁止）
+      - GMAIL_CLIENT_ID=${GMAIL_CLIENT_ID:-}
+      - GMAIL_CLIENT_SECRET=${GMAIL_CLIENT_SECRET:-}
+      - GMAIL_REFRESH_TOKEN=${GMAIL_REFRESH_TOKEN:-}
+      # OpenAI API Key（設定した場合のみAI候補補完が有効化される）
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      # 見積データ（プロジェクト・JSON）を永続化
+      - estimator_data:/app/server/data
+      # OCRで保存したPDFプレビューを永続化
+      - ocr_storage:/app/ai_api/storage
+    depends_on:
+      - ocr_api
+    restart: unless-stopped
+    networks:
+      - estimator_net
+
+  # ─── OCR API (Python FastAPI + RapidOCR) ─────────────────────────
+  ocr_api:
+    build:
+      context: ./ai_api
+      dockerfile: Dockerfile.ocr
+    container_name: estimator-ocr
+    ports:
+      - "8000:8000"
+    environment:
+      - CORS_ALLOW_ORIGINS=http://localhost:3000,http://localhost:5173
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - ocr_storage:/app/storage
+    restart: unless-stopped
+    networks:
+      - estimator_net
+
+  # ─── Earthwork API (codex-tools-root) ─────────────────────────────
+  # ※ オプション: DXF数量検証が不要な場合はコメントアウト可
+  earthwork_api:
+    build:
+      context: ../codex-tools-root
+      dockerfile: Dockerfile
+    container_name: estimator-earthwork
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    networks:
+      - estimator_net
+    profiles:
+      - full  # docker compose --profile full up で起動
+
+# ─── ボリューム ─────────────────────────────────────────────────────
+volumes:
+  estimator_data:
+    driver: local
+  ocr_storage:
+    driver: local
+
+# ─── ネットワーク ───────────────────────────────────────────────────
+networks:
+  estimator_net:
+    driver: bridge
