@@ -1200,10 +1200,554 @@ function calculateMaterialTakeoff(block: EstimateBlock, options?: CalculationOpt
   }), block, context), block, context);
 }
 
+// ═══════════════════════════════════════════════════
+// §NEW-1: 外構工 (exterior_work)
+// ═══════════════════════════════════════════════════
+function calculateExteriorWork(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const result = emptyResult('exterior_work', block.name || '外構工', 'm2');
+  const area = Math.max(0, block.exteriorArea || 0);
+  const depth = Math.max(0, block.exteriorDepth || 0);
+  const stoneThickness = Math.max(0, block.crushedStoneThickness || 0);
+  const concreteThickness = Math.max(0, block.baseThickness || 0);
+  const laborCost = context.laborCost;
+  const soilL = getLooseningFactor(block.groundCondition || '');
+  const finishUnitPrice = Math.max(0, block.exteriorFinishUnitPrice || 0);
+
+  // 掘削
+  const excDepth = depth > 0 ? depth : (stoneThickness + concreteThickness + 0.1);
+  const excavationVolume = area * excDepth * soilL;
+  const fourHourExc = context.machineCapacity > 0
+    ? getFourHourExcavationCoefficient(context.machineCapacity) * context.machineCapacity : 0;
+  const excavationDays = fourHourExc > 0 ? Math.ceil(excavationVolume / fourHourExc) : 0;
+  const excavationWorkers = excavationDays > 0 ? Math.ceil(Math.sqrt(area) / 10) + 2 : 0;
+  const machineAmount = excavationDays * context.machineUnitPrice * 2;
+  const excavationLabor = excavationDays * excavationWorkers * laborCost;
+  const excavationCost = excavationLabor + machineAmount;
+
+  // 砕石
+  const stoneVolume = area * stoneThickness * 1.2;
+  const stoneDays = fourHourExc > 0 ? Math.ceil(stoneVolume / fourHourExc) : 0;
+  const stoneWorkers = stoneDays > 0 ? Math.ceil(area / 50) : 0;
+  const stoneLaborCost = stoneDays * stoneWorkers * laborCost;
+  const stoneMachineCost = stoneDays * context.machineUnitPrice;
+  const stoneMaterialCost = stoneVolume * context.stoneUnitPrice;
+  const stoneTotal = stoneLaborCost + stoneMachineCost + stoneMaterialCost;
+
+  // コンクリート
+  const concreteVolume = area * concreteThickness * 1.1;
+  const pouringW = getPouringWorkers(concreteVolume);
+  const concreteMaterialCost = concreteVolume * context.concreteUnitPrice;
+  const concreteLaborCost = pouringW * laborCost;
+  const concreteTotal = concreteMaterialCost + concreteLaborCost;
+
+  // 仕上げ
+  const finishCost = area * finishUnitPrice;
+
+  // 残土
+  const backfillVolume = area * (excDepth - stoneThickness - concreteThickness) * soilL;
+  const soilRemovalVolume = Math.max(excavationVolume - Math.max(backfillVolume, 0), 0);
+  const dumpCount = context.dumpCapacity > 0 ? Math.ceil(soilRemovalVolume / context.dumpCapacity) : 0;
+  const soilRemovalDays = fourHourExc > 0 ? Math.ceil(soilRemovalVolume / fourHourExc) : 0;
+  const regularDumpCount = soilRemovalDays > 0 ? Math.ceil(dumpCount / soilRemovalDays) : 0;
+  const soilRemovalAmount = (regularDumpCount * context.dumpVehicleUnitPrice * soilRemovalDays)
+    + (soilRemovalDays * laborCost);
+
+  const lineItems = [
+    createLineItem({ key: 'ext.excavation', section: '土工', itemName: '掘削工', specification: block.machine || '', quantity: excavationVolume, unit: 'm3', unitPrice: excavationVolume > 0 ? excavationCost / excavationVolume : 0, amount: excavationCost, remarks: '' }),
+    createLineItem({ key: 'ext.soilRemoval', section: '土工', itemName: '残土搬出', specification: block.dumpTruck || '', quantity: soilRemovalVolume, unit: 'm3', unitPrice: soilRemovalVolume > 0 ? soilRemovalAmount / soilRemovalVolume : 0, amount: soilRemovalAmount, remarks: '' }),
+    createLineItem({ key: 'ext.stone', section: '基礎工', itemName: '砕石工', specification: block.crushedStone || '', quantity: stoneVolume, unit: 'm3', unitPrice: stoneVolume > 0 ? stoneTotal / stoneVolume : 0, amount: stoneTotal, remarks: '' }),
+    createLineItem({ key: 'ext.concrete', section: '基礎工', itemName: 'コンクリート工', specification: block.concrete || '', quantity: concreteVolume, unit: 'm3', unitPrice: concreteVolume > 0 ? concreteTotal / concreteVolume : 0, amount: concreteTotal, remarks: '' }),
+    createLineItem({ key: 'ext.finish', section: '仕上工', itemName: '仕上げ工', specification: '', quantity: area, unit: 'm2', unitPrice: finishUnitPrice, amount: finishCost, remarks: '' }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    excavationVolume: round2(excavationVolume), excavationDays, machineAmount: Math.round(machineAmount),
+    excavationConstructionAmount: Math.round(excavationCost),
+    soilRemovalVolume: round2(soilRemovalVolume), soilRemovalAmount: Math.round(soilRemovalAmount),
+    crushedStoneVolume: round2(stoneVolume), crushedStoneTotal: Math.round(stoneTotal),
+    baseConcreteVolume: round2(concreteVolume), baseTotalAmount: Math.round(concreteTotal),
+    materialTotalCost: Math.round(finishCost),
+    displayName: block.name || '外構工', primaryQuantity: area, primaryUnit: 'm2',
+    detailSections: [
+      { id: 'ext-overview', title: '基本数量', tone: 'bg-slate-700', metrics: [metric('施工面積', area, 'm2'), metric('概算総額', excavationCost + soilRemovalAmount + stoneTotal + concreteTotal + finishCost, '円', 'currency')] },
+      { id: 'ext-earth', title: '土工', tone: 'bg-blue-600', metrics: [metric('掘削量', excavationVolume, 'm3'), metric('残土量', soilRemovalVolume, 'm3')] },
+      { id: 'ext-base', title: '基礎工', tone: 'bg-amber-500', metrics: [metric('砕石量', stoneVolume, 'm3'), metric('コンクリート量', concreteVolume, 'm3')] },
+    ],
+    lineItems,
+    priceEvidence: [],
+  }), block, context), block, context);
+}
+
+// ═══════════════════════════════════════════════════
+// §NEW-2: 型枠工 (formwork) — 国交省土木積算基準準拠
+// ═══════════════════════════════════════════════════
+function calculateFormwork(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const result = emptyResult('formwork', block.name || '型枠工', 'm2');
+  const area = Math.max(0, block.formworkArea || 0);
+  const laborCost = context.laborCost;
+  const formworkType = block.formworkType || 'foundation';
+  const formworkUnitPrice = block.formworkCost || 3500;
+
+  // 国交省基準歩掛: 基礎=5.0m²/人日, 壁=4.5m²/人日, スラブ=6.0m²/人日
+  const productivityMap: Record<string, number> = { foundation: 5.0, wall: 4.5, slab: 6.0 };
+  const productivity = productivityMap[formworkType] ?? 5.0;
+
+  const assemblyWorkers = area > 0 ? Math.ceil(area / productivity) : 0;
+  const disassemblyWorkers = Math.ceil(assemblyWorkers * 0.4); // 解体は組立の40%
+  const materialCost = area * formworkUnitPrice;
+  const assemblyLabor = assemblyWorkers * laborCost;
+  const disassemblyLabor = disassemblyWorkers * laborCost;
+  const totalCost = materialCost + assemblyLabor + disassemblyLabor;
+
+  const lineItems = [
+    createLineItem({ key: 'fw.material', section: '型枠工', itemName: '型枠材料', specification: `${formworkType === 'foundation' ? '基礎' : formworkType === 'wall' ? '壁' : 'スラブ'}型枠`, quantity: area, unit: 'm2', unitPrice: formworkUnitPrice, amount: materialCost, remarks: '' }),
+    createLineItem({ key: 'fw.assembly', section: '型枠工', itemName: '型枠組立', specification: `歩掛${productivity}m2/人日`, quantity: assemblyWorkers, unit: '人', unitPrice: laborCost, amount: assemblyLabor, remarks: '' }),
+    createLineItem({ key: 'fw.disassembly', section: '型枠工', itemName: '型枠解体', specification: '組立の40%', quantity: disassemblyWorkers, unit: '人', unitPrice: laborCost, amount: disassemblyLabor, remarks: '' }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    formworkArea: round2(area), formworkMaterialCost: round2(materialCost),
+    displayName: block.name || '型枠工', primaryQuantity: area, primaryUnit: 'm2',
+    detailSections: [
+      { id: 'fw-overview', title: '型枠数量', tone: 'bg-slate-700', metrics: [metric('型枠面積', area, 'm2'), metric('組立人工', assemblyWorkers, '人'), metric('解体人工', disassemblyWorkers, '人'), metric('合計', totalCost, '円', 'currency')] },
+    ],
+    lineItems,
+    priceEvidence: [],
+  }), block, context), block, context);
+}
+
+// ═══════════════════════════════════════════════════
+// §NEW-3: 土間コンクリート工 (concrete_slab)
+// ═══════════════════════════════════════════════════
+function calculateConcreteSlab(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const result = emptyResult('concrete_slab', block.name || '土間コンクリート工', 'm2');
+  const area = Math.max(0, block.slabArea || 0);
+  const slabThickness = Math.max(0, block.slabThickness || 0.15);
+  const stoneThickness = Math.max(0, block.slabStoneThickness || 0.10);
+  const hasWireMesh = block.slabHasWireMesh !== false;
+  const laborCost = context.laborCost;
+  const soilL = getLooseningFactor(block.groundCondition || '');
+
+  // 掘削
+  const excDepth = stoneThickness + slabThickness + 0.1;
+  const excavationVolume = area * excDepth * soilL;
+  const fourHourExc = context.machineCapacity > 0
+    ? getFourHourExcavationCoefficient(context.machineCapacity) * context.machineCapacity : 0;
+  const excavationDays = fourHourExc > 0 ? Math.ceil(excavationVolume / fourHourExc) : 0;
+  const machineAmount = excavationDays * context.machineUnitPrice * 2;
+  const excavationLabor = excavationDays * (Math.ceil(Math.sqrt(area) / 10) + 2) * laborCost;
+  const excavationCost = excavationLabor + machineAmount;
+
+  // 砕石
+  const stoneVolume = area * stoneThickness * 1.2;
+  const stoneCost = stoneVolume * context.stoneUnitPrice;
+  const stoneLaborDays = fourHourExc > 0 ? Math.ceil(stoneVolume / fourHourExc) : 0;
+  const stoneLabor = stoneLaborDays * Math.ceil(area / 50) * laborCost;
+  const stoneTotal = stoneCost + stoneLabor;
+
+  // コンクリート
+  const concreteVolume = area * slabThickness * 1.1;
+  const pouringW = getPouringWorkers(concreteVolume);
+  const concreteCost = concreteVolume * context.concreteUnitPrice;
+  const pouringLabor = pouringW * laborCost;
+  // 左官仕上げ: 30m²/人日
+  const plastererWorkers = area > 0 ? Math.ceil(area / 30) : 0;
+  const plastererLabor = plastererWorkers * laborCost;
+  const concreteTotal = concreteCost + pouringLabor + plastererLabor;
+
+  // ワイヤーメッシュ
+  const wireMeshArea = hasWireMesh ? area * 1.1 : 0; // ラップ代10%
+  const wireMeshUnitPrice = 550; // 標準6-150 ¥550/m²
+  const wireMeshCost = wireMeshArea * wireMeshUnitPrice;
+
+  // 型枠 (外周)
+  const perimeter = area > 0 ? Math.sqrt(area) * 4 : 0; // 近似正方形
+  const formworkArea2 = perimeter * slabThickness;
+  const formworkCost = formworkArea2 * (block.formworkCost || 3500);
+
+  // 残土
+  const soilRemovalVolume = Math.max(excavationVolume - area * (excDepth - stoneThickness - slabThickness) * soilL, 0);
+  const soilRemovalAmount = soilRemovalVolume > 0 && context.dumpCapacity > 0
+    ? Math.ceil(soilRemovalVolume / context.dumpCapacity) * context.dumpVehicleUnitPrice + laborCost : 0;
+
+  const lineItems = [
+    createLineItem({ key: 'slab.excavation', section: '土工', itemName: '掘削工', specification: block.machine || '', quantity: excavationVolume, unit: 'm3', unitPrice: excavationVolume > 0 ? excavationCost / excavationVolume : 0, amount: excavationCost, remarks: '' }),
+    createLineItem({ key: 'slab.soilRemoval', section: '土工', itemName: '残土搬出', specification: '', quantity: soilRemovalVolume, unit: 'm3', unitPrice: soilRemovalVolume > 0 ? soilRemovalAmount / soilRemovalVolume : 0, amount: soilRemovalAmount, remarks: '' }),
+    createLineItem({ key: 'slab.stone', section: '基礎工', itemName: '砕石工', specification: block.crushedStone || '', quantity: stoneVolume, unit: 'm3', unitPrice: stoneVolume > 0 ? stoneTotal / stoneVolume : 0, amount: stoneTotal, remarks: '' }),
+    createLineItem({ key: 'slab.concrete', section: 'コンクリート工', itemName: '土間コンクリート', specification: `${block.concrete || ''} t=${slabThickness}m`, quantity: concreteVolume, unit: 'm3', unitPrice: concreteVolume > 0 ? concreteTotal / concreteVolume : 0, amount: concreteTotal, remarks: '打設+左官含む' }),
+    ...(hasWireMesh ? [createLineItem({ key: 'slab.wiremesh', section: 'コンクリート工', itemName: 'ワイヤーメッシュ', specification: '6-150', quantity: wireMeshArea, unit: 'm2', unitPrice: wireMeshUnitPrice, amount: wireMeshCost, remarks: 'ラップ10%増' })] : []),
+    createLineItem({ key: 'slab.formwork', section: 'コンクリート工', itemName: '型枠', specification: '外周', quantity: formworkArea2, unit: 'm2', unitPrice: formworkArea2 > 0 ? formworkCost / formworkArea2 : 0, amount: formworkCost, remarks: '' }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    excavationVolume: round2(excavationVolume), crushedStoneVolume: round2(stoneVolume),
+    baseConcreteVolume: round2(concreteVolume), formworkArea: round2(formworkArea2),
+    displayName: block.name || '土間コンクリート工', primaryQuantity: area, primaryUnit: 'm2',
+    detailSections: [
+      { id: 'slab-overview', title: '基本数量', tone: 'bg-slate-700', metrics: [metric('施工面積', area, 'm2'), metric('コンクリート量', concreteVolume, 'm3'), metric('概算総額', excavationCost + soilRemovalAmount + stoneTotal + concreteTotal + wireMeshCost + formworkCost, '円', 'currency')] },
+    ],
+    lineItems,
+    priceEvidence: [],
+  }), block, context), block, context);
+}
+
+// ═══════════════════════════════════════════════════
+// §NEW-4: フェンス工 (fence)
+// ═══════════════════════════════════════════════════
+function calculateFence(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const result = emptyResult('fence', block.name || 'フェンス工', 'm');
+  const length = Math.max(0, block.fenceLength || 0);
+  const height = Math.max(0, block.fenceHeight || 1.0);
+  const postInterval = Math.max(0.5, block.fencePostInterval || 2.0);
+  const laborCost = context.laborCost;
+  const soilL = getLooseningFactor(block.groundCondition || '');
+
+  const postCount = length > 0 ? Math.ceil(length / postInterval) + 1 : 0;
+  const panelCount = length > 0 ? Math.ceil(length / postInterval) : 0;
+  const postUnitPrice = block.fencePostUnitPrice || 3500;
+  const panelUnitPrice = block.fencePanelUnitPrice || 5000;
+
+  // 支柱基礎 (独立基礎: 0.3×0.3×0.5m)
+  const foundationVolume = postCount * 0.3 * 0.3 * 0.5;
+  const foundationExcavation = postCount * 0.4 * 0.4 * 0.6 * soilL;
+  const foundationConcreteCost = foundationVolume * 1.1 * context.concreteUnitPrice;
+
+  // 材料
+  const postMaterialCost = postCount * postUnitPrice;
+  const panelMaterialCost = panelCount * panelUnitPrice;
+
+  // 労務: 15m/人日
+  const installWorkers = length > 0 ? Math.ceil(length / 15) : 0;
+  const installLabor = installWorkers * laborCost;
+
+  const totalCost = foundationConcreteCost + postMaterialCost + panelMaterialCost + installLabor;
+
+  const lineItems = [
+    createLineItem({ key: 'fence.foundation', section: '基礎工', itemName: '支柱基礎', specification: `独立基礎 ${postCount}箇所`, quantity: foundationVolume, unit: 'm3', unitPrice: foundationVolume > 0 ? foundationConcreteCost / foundationVolume : 0, amount: foundationConcreteCost, remarks: '' }),
+    createLineItem({ key: 'fence.post', section: 'フェンス工', itemName: '支柱', specification: `H=${height}m`, quantity: postCount, unit: '本', unitPrice: postUnitPrice, amount: postMaterialCost, remarks: '' }),
+    createLineItem({ key: 'fence.panel', section: 'フェンス工', itemName: 'パネル', specification: block.fenceType || 'メッシュ', quantity: panelCount, unit: '枚', unitPrice: panelUnitPrice, amount: panelMaterialCost, remarks: '' }),
+    createLineItem({ key: 'fence.install', section: 'フェンス工', itemName: '施工費', specification: '15m/人日', quantity: installWorkers, unit: '人', unitPrice: laborCost, amount: installLabor, remarks: '' }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    productCount: postCount, installWorkers,
+    displayName: block.name || 'フェンス工', primaryQuantity: length, primaryUnit: 'm',
+    detailSections: [
+      { id: 'fence-overview', title: 'フェンス数量', tone: 'bg-slate-700', metrics: [metric('施工延長', length, 'm'), metric('支柱本数', postCount, '本'), metric('パネル枚数', panelCount, '枚'), metric('合計', totalCost, '円', 'currency')] },
+    ],
+    lineItems,
+    priceEvidence: [],
+  }), block, context), block, context);
+}
+
+// ═══════════════════════════════════════════════════
+// §NEW-5: ブロック積工 (block_installation) — 国交省基準
+// ═══════════════════════════════════════════════════
+function calculateBlockInstallation(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const result = emptyResult('block_installation', block.name || 'ブロック積工', 'm2');
+  const blockLength = Math.max(0, block.blockLength || 0);
+  const blockHeight = Math.max(0, block.blockHeight || 0);
+  const area = Math.max(0, block.blockArea || (blockLength * blockHeight));
+  const thickness = block.blockThickness || 0.12; // CB120
+  const laborCost = context.laborCost;
+  const soilL = getLooseningFactor(block.groundCondition || '');
+
+  // ブロック数: 標準CB 390×190mm → 0.39×0.19 = 0.0741m²/個
+  const blockCount = area > 0 ? Math.ceil(area / 0.0741) : 0;
+  const blockUnitPrice = block.customUnitPrice || 250; // CB120 標準 ¥250/個
+
+  // 基礎: 幅=ブロック厚+0.1m, 厚=0.15m
+  const foundationWidth = thickness + 0.1;
+  const foundationThickness = 0.15;
+  const foundationConcreteVol = blockLength * foundationWidth * foundationThickness * 1.1;
+  const foundationFormwork = blockLength * foundationThickness * 2;
+  const stoneVolume = blockLength * foundationWidth * 0.1 * 1.2;
+
+  // 鉄筋: 縦筋D10@800, 横筋D10@400
+  const verticalBars = blockLength > 0 ? Math.ceil(blockLength / 0.8) : 0;
+  const horizontalBars = blockHeight > 0 ? Math.ceil(blockHeight / 0.4) : 0;
+  const rebarWeight = (verticalBars * blockHeight * 0.56) + (horizontalBars * blockLength * 0.56); // D10=0.56kg/m
+  const rebarUnitPrice = 150; // ¥/kg
+
+  // モルタル: 充填0.003m³/個 + 目地0.005m³/m²
+  const mortarVolume = (blockCount * 0.003) + (area * 0.005);
+
+  // 施工人工: 4.5m²/人日
+  const installWorkers = area > 0 ? Math.ceil(area / 4.5) : 0;
+  const installLabor = installWorkers * laborCost;
+
+  // 掘削(基礎部分)
+  const excavationVolume = blockLength * (foundationWidth + 0.2) * (foundationThickness + 0.1 + 0.1) * soilL;
+  const fourHourExc = context.machineCapacity > 0
+    ? getFourHourExcavationCoefficient(context.machineCapacity) * context.machineCapacity : 0;
+  const excavationDays = fourHourExc > 0 ? Math.ceil(excavationVolume / fourHourExc) : 0;
+  const excavationCost = (excavationDays * context.machineUnitPrice * 2) + (excavationDays * 3 * laborCost);
+
+  const blockMaterialCost = blockCount * blockUnitPrice;
+  const foundationConcreteCost = foundationConcreteVol * context.concreteUnitPrice;
+  const foundationFormworkCost = foundationFormwork * (block.formworkCost || 3500);
+  const stoneCost = stoneVolume * context.stoneUnitPrice;
+  const rebarCost = rebarWeight * rebarUnitPrice;
+  const mortarCost = mortarVolume * 26000; // モルタル1:3 ¥26,000/m³
+
+  const lineItems = [
+    createLineItem({ key: 'blk.excavation', section: '土工', itemName: '掘削工', specification: '', quantity: excavationVolume, unit: 'm3', unitPrice: excavationVolume > 0 ? excavationCost / excavationVolume : 0, amount: excavationCost, remarks: '' }),
+    createLineItem({ key: 'blk.stone', section: '基礎工', itemName: '砕石基礎', specification: '', quantity: stoneVolume, unit: 'm3', unitPrice: context.stoneUnitPrice, amount: stoneCost, remarks: '' }),
+    createLineItem({ key: 'blk.foundation', section: '基礎工', itemName: '基礎コンクリート', specification: '', quantity: foundationConcreteVol, unit: 'm3', unitPrice: context.concreteUnitPrice, amount: foundationConcreteCost, remarks: '' }),
+    createLineItem({ key: 'blk.formwork', section: '基礎工', itemName: '基礎型枠', specification: '', quantity: foundationFormwork, unit: 'm2', unitPrice: block.formworkCost || 3500, amount: foundationFormworkCost, remarks: '' }),
+    createLineItem({ key: 'blk.rebar', section: 'ブロック工', itemName: '鉄筋', specification: 'D10', quantity: rebarWeight, unit: 'kg', unitPrice: rebarUnitPrice, amount: rebarCost, remarks: '' }),
+    createLineItem({ key: 'blk.block', section: 'ブロック工', itemName: 'CBブロック', specification: `厚${thickness * 1000}mm`, quantity: blockCount, unit: '個', unitPrice: blockUnitPrice, amount: blockMaterialCost, remarks: '' }),
+    createLineItem({ key: 'blk.mortar', section: 'ブロック工', itemName: 'モルタル', specification: '1:3', quantity: mortarVolume, unit: 'm3', unitPrice: 26000, amount: mortarCost, remarks: '' }),
+    createLineItem({ key: 'blk.install', section: 'ブロック工', itemName: '積み施工', specification: '4.5m2/人日', quantity: installWorkers, unit: '人', unitPrice: laborCost, amount: installLabor, remarks: '' }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    excavationVolume: round2(excavationVolume), crushedStoneVolume: round2(stoneVolume),
+    baseConcreteVolume: round2(foundationConcreteVol), productCount: blockCount,
+    displayName: block.name || 'ブロック積工', primaryQuantity: area, primaryUnit: 'm2',
+    detailSections: [
+      { id: 'blk-overview', title: 'ブロック数量', tone: 'bg-slate-700', metrics: [metric('施工面積', area, 'm2'), metric('ブロック数', blockCount, '個'), metric('鉄筋量', rebarWeight, 'kg'), metric('合計', excavationCost + stoneCost + foundationConcreteCost + foundationFormworkCost + rebarCost + blockMaterialCost + mortarCost + installLabor, '円', 'currency')] },
+    ],
+    lineItems,
+    priceEvidence: [],
+  }), block, context), block, context);
+}
+
+// ═══════════════════════════════════════════════════
+// §NEW-6: 型枠ブロック工 (formwork_block)
+// ═══════════════════════════════════════════════════
+function calculateFormworkBlock(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const result = emptyResult('formwork_block', block.name || '型枠ブロック工', 'm2');
+  const fbLength = Math.max(0, block.formworkBlockLength || 0);
+  const fbHeight = Math.max(0, block.formworkBlockHeight || 0);
+  const area = Math.max(0, block.formworkBlockArea || (fbLength * fbHeight));
+  const thickness = block.formworkBlockThickness || 0.15;
+  const laborCost = context.laborCost;
+  const soilL = getLooseningFactor(block.groundCondition || '');
+
+  // ブロック数
+  const blockCount = area > 0 ? Math.ceil(area / 0.0741) : 0;
+  const blockUnitPrice = block.customUnitPrice || 450; // CP型枠ブロック ¥450/個
+
+  // コンクリート充填: 面積×厚×充填率0.65
+  const concreteFillVolume = area * thickness * 0.65;
+
+  // 鉄筋: 縦D13@400, 横D10@200 (CBより密)
+  const vertBars = fbLength > 0 ? Math.ceil(fbLength / 0.4) : 0;
+  const horizBars = fbHeight > 0 ? Math.ceil(fbHeight / 0.2) : 0;
+  const rebarWeight = (vertBars * fbHeight * 0.995) + (horizBars * fbLength * 0.56); // D13=0.995, D10=0.56
+  const rebarUnitPrice = 150;
+
+  // 基礎
+  const foundationWidth = thickness + 0.15;
+  const foundationVol = fbLength * foundationWidth * 0.2 * 1.1;
+  const stoneVolume = fbLength * foundationWidth * 0.1 * 1.2;
+
+  // 施工: 3.5m²/人日 (CBより低い歩掛)
+  const installWorkers = area > 0 ? Math.ceil(area / 3.5) : 0;
+  const installLabor = installWorkers * laborCost;
+
+  // 掘削
+  const excavationVolume = fbLength * (foundationWidth + 0.2) * 0.4 * soilL;
+
+  const blockMaterialCost = blockCount * blockUnitPrice;
+  const concreteFillCost = concreteFillVolume * context.concreteUnitPrice;
+  const rebarCost = rebarWeight * rebarUnitPrice;
+  const foundationCost = foundationVol * context.concreteUnitPrice;
+  const stoneCost = stoneVolume * context.stoneUnitPrice;
+
+  const lineItems = [
+    createLineItem({ key: 'fblk.stone', section: '基礎工', itemName: '砕石基礎', specification: '', quantity: stoneVolume, unit: 'm3', unitPrice: context.stoneUnitPrice, amount: stoneCost, remarks: '' }),
+    createLineItem({ key: 'fblk.foundation', section: '基礎工', itemName: '基礎コンクリート', specification: '', quantity: foundationVol, unit: 'm3', unitPrice: context.concreteUnitPrice, amount: foundationCost, remarks: '' }),
+    createLineItem({ key: 'fblk.rebar', section: '型枠ブロック工', itemName: '鉄筋', specification: 'D13+D10', quantity: rebarWeight, unit: 'kg', unitPrice: rebarUnitPrice, amount: rebarCost, remarks: '' }),
+    createLineItem({ key: 'fblk.block', section: '型枠ブロック工', itemName: 'CP型枠ブロック', specification: `厚${thickness * 1000}mm`, quantity: blockCount, unit: '個', unitPrice: blockUnitPrice, amount: blockMaterialCost, remarks: '' }),
+    createLineItem({ key: 'fblk.fill', section: '型枠ブロック工', itemName: 'コンクリート充填', specification: '充填率65%', quantity: concreteFillVolume, unit: 'm3', unitPrice: context.concreteUnitPrice, amount: concreteFillCost, remarks: '' }),
+    createLineItem({ key: 'fblk.install', section: '型枠ブロック工', itemName: '積み施工', specification: '3.5m2/人日', quantity: installWorkers, unit: '人', unitPrice: laborCost, amount: installLabor, remarks: '' }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    excavationVolume: round2(excavationVolume), crushedStoneVolume: round2(stoneVolume),
+    baseConcreteVolume: round2(foundationVol + concreteFillVolume), productCount: blockCount,
+    displayName: block.name || '型枠ブロック工', primaryQuantity: area, primaryUnit: 'm2',
+    detailSections: [
+      { id: 'fblk-overview', title: '型枠ブロック数量', tone: 'bg-slate-700', metrics: [metric('施工面積', area, 'm2'), metric('ブロック数', blockCount, '個'), metric('充填Con量', concreteFillVolume, 'm3'), metric('鉄筋量', rebarWeight, 'kg'), metric('合計', stoneCost + foundationCost + rebarCost + blockMaterialCost + concreteFillCost + installLabor, '円', 'currency')] },
+    ],
+    lineItems,
+    priceEvidence: [],
+  }), block, context), block, context);
+}
+
+// ═══════════════════════════════════════════════════
+// §NEW-7: 構造物設置工 (structure_installation)
+// ═══════════════════════════════════════════════════
+function calculateStructureInstallation(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const result = emptyResult('structure_installation', block.name || '構造物設置工', '箇所');
+  const structureName = block.structureName || block.secondaryProduct || '構造物';
+  const quantity = Math.max(0, block.structureQuantity || block.countQuantity || 0);
+  const unit = block.structureUnit || block.countUnit || '箇所';
+  const unitPrice = block.structureUnitPrice || block.customUnitPrice || 0;
+  const laborCost = context.laborCost;
+
+  const materialCost = quantity * unitPrice;
+  // 設置労務: 構造物1箇所あたり0.5人日
+  const installWorkers = quantity > 0 ? Math.ceil(quantity * 0.5) : 0;
+  const installLabor = installWorkers * laborCost;
+
+  const lineItems = [
+    createLineItem({ key: 'struct.material', section: '構造物設置工', itemName: structureName, specification: '', quantity, unit, unitPrice, amount: materialCost, remarks: '' }),
+    createLineItem({ key: 'struct.install', section: '構造物設置工', itemName: '設置施工', specification: '0.5人/箇所', quantity: installWorkers, unit: '人', unitPrice: laborCost, amount: installLabor, remarks: '' }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    productCount: quantity, materialTotalCost: Math.round(materialCost), installWorkers,
+    displayName: structureName, primaryQuantity: quantity, primaryUnit: unit,
+    detailSections: [
+      { id: 'struct-overview', title: '構造物設置', tone: 'bg-slate-700', metrics: [metric('数量', quantity, unit), metric('材料費', materialCost, '円', 'currency'), metric('施工費', installLabor, '円', 'currency'), metric('合計', materialCost + installLabor, '円', 'currency')] },
+    ],
+    lineItems,
+    priceEvidence: [],
+  }), block, context), block, context);
+}
+
+// ═══════════════════════════════════════════════════
+// §NEW-8: 自費工事 (self_funded_work)
+// ═══════════════════════════════════════════════════
+function calculateSelfFundedWork(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const result = emptyResult('self_funded_work', block.name || '自費工事', '式');
+  const itemName = block.selfFundedName || block.name || '自費工事';
+  const quantity = Math.max(0, block.selfFundedQuantity || 0);
+  const unit = block.selfFundedUnit || '式';
+  const unitPrice = Math.max(0, block.selfFundedUnitPrice || 0);
+  const amount = Math.round(quantity * unitPrice);
+
+  const lineItems = [
+    createLineItem({ key: 'self.work', section: '自費工事', itemName, specification: '', quantity, unit, unitPrice, amount, remarks: '自費（実費）工事' }),
+  ];
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    materialTotalCost: amount,
+    displayName: itemName, primaryQuantity: quantity, primaryUnit: unit,
+    detailSections: [
+      { id: 'self-overview', title: '自費工事', tone: 'bg-slate-700', metrics: [metric('数量', quantity, unit), metric('単価', unitPrice, '円', 'currency'), metric('合計', amount, '円', 'currency')] },
+    ],
+    lineItems,
+    priceEvidence: [],
+  }), block, context), block, context);
+}
+
+// ═══════════════════════════════════════════════════
+// §NEW-9: 切盛土工 (cut_fill) — 国交省土木積算基準準拠
+// ═══════════════════════════════════════════════════
+function calculateCutFill(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
+  const context = buildRateContext(block, options);
+  const result = emptyResult('cut_fill', block.name || '切盛土工', 'm3');
+  const cutVol = Math.max(0, block.cutVolume || 0);
+  const fillVol = Math.max(0, block.fillVolume || 0);
+  const laborCost = context.laborCost;
+  const soilL = getLooseningFactor(block.cutFillSoilType || block.groundCondition || '');
+  // 締固め係数C (国交省基準)
+  const soilCMap: Record<string, number> = { '砂質土': 0.88, '普通土': 0.90, '粘性土': 0.90, '礫質土': 0.92, '軟岩': 0.85 };
+  const soilC = soilCMap[block.cutFillSoilType || ''] || 0.90;
+
+  // 切土
+  const cutVolumeLoose = cutVol * soilL;
+  const fourHourExc = context.machineCapacity > 0
+    ? getFourHourExcavationCoefficient(context.machineCapacity) * context.machineCapacity : 0;
+  const cutDays = fourHourExc > 0 ? Math.ceil(cutVolumeLoose / fourHourExc) : 0;
+  const cutMachineCost = cutDays * context.machineUnitPrice * 2;
+  const cutWorkers = cutDays > 0 ? cutDays * 3 : 0;
+  const cutLaborCost = cutWorkers * laborCost;
+  const cutTotalCost = cutMachineCost + cutLaborCost;
+
+  // 盛土に流用可能量
+  const reuseVolume = Math.min(cutVolumeLoose, fillVol / soilC);
+  // 残土搬出量
+  const disposalVolume = Math.max(cutVolumeLoose - reuseVolume, 0);
+  const disposalDays = fourHourExc > 0 ? Math.ceil(disposalVolume / fourHourExc) : 0;
+  const dumpCount = context.dumpCapacity > 0 ? Math.ceil(disposalVolume / context.dumpCapacity) : 0;
+  const regularDumpCount = disposalDays > 0 ? Math.ceil(dumpCount / disposalDays) : 0;
+  const disposalCost = (regularDumpCount * context.dumpVehicleUnitPrice * disposalDays) + (disposalDays * laborCost);
+
+  // 盛土
+  const fillNeeded = fillVol / soilC; // 必要ほぐし土量
+  const importVolume = Math.max(fillNeeded - reuseVolume, 0); // 外部搬入量
+  const fillDays = fourHourExc > 0 ? Math.ceil(fillVol / fourHourExc) : 0;
+  const fillMachineCost = fillDays * context.machineUnitPrice * 2;
+  const fillWorkers = fillDays > 0 ? fillDays * 3 : 0;
+  const fillLaborCost = fillWorkers * laborCost;
+  // 転圧: 1層30cm
+  const compactionLayers = fillVol > 0 ? Math.ceil((fillVol / (fillVol > 0 ? Math.cbrt(fillVol * fillVol) : 1)) / 0.3) : 0;
+  const compactionCost = compactionLayers > 0 ? compactionLayers * context.machineUnitPrice : 0;
+  const fillTotalCost = fillMachineCost + fillLaborCost + compactionCost;
+
+  // 法面 (オプション)
+  const slopeHeight = Math.max(0, block.cutFillSlopeHeight || 0);
+  const slopeGradient = block.cutFillSlopeGradient || 1.5;
+  const slopeLength = slopeHeight > 0 ? Math.sqrt(slopeHeight * slopeHeight + (slopeHeight * slopeGradient) * (slopeHeight * slopeGradient)) : 0;
+  const slopeArea = slopeLength * (cutVol > 0 ? Math.cbrt(cutVol) : 0);
+  const slopeProtectionCost = slopeArea * 2500; // 法面保護 ¥2,500/m²
+
+  const lineItems = [
+    createLineItem({ key: 'cf.cut', section: '切土工', itemName: '掘削・積込', specification: block.machine || '', quantity: cutVolumeLoose, unit: 'm3', unitPrice: cutVolumeLoose > 0 ? cutTotalCost / cutVolumeLoose : 0, amount: cutTotalCost, remarks: `L=${soilL}` }),
+    createLineItem({ key: 'cf.disposal', section: '切土工', itemName: '残土搬出', specification: block.dumpTruck || '', quantity: disposalVolume, unit: 'm3', unitPrice: disposalVolume > 0 ? disposalCost / disposalVolume : 0, amount: disposalCost, remarks: '' }),
+    createLineItem({ key: 'cf.fill', section: '盛土工', itemName: '盛土・転圧', specification: `C=${soilC}`, quantity: fillVol, unit: 'm3', unitPrice: fillVol > 0 ? fillTotalCost / fillVol : 0, amount: fillTotalCost, remarks: '' }),
+    ...(slopeArea > 0 ? [createLineItem({ key: 'cf.slope', section: '法面工', itemName: '法面保護', specification: `勾配1:${slopeGradient}`, quantity: slopeArea, unit: 'm2', unitPrice: 2500, amount: slopeProtectionCost, remarks: '' })] : []),
+  ];
+
+  const totalQuantity = cutVol + fillVol;
+
+  return applyZoneBreakdowns(applyPhasedExecutionAdjustments(finalizeCommonResult({
+    ...result,
+    excavationVolume: round2(cutVolumeLoose), soilRemovalVolume: round2(disposalVolume),
+    soilRemovalAmount: Math.round(disposalCost), backfillVolume: round2(fillVol),
+    displayName: block.name || '切盛土工', primaryQuantity: totalQuantity, primaryUnit: 'm3',
+    detailSections: [
+      { id: 'cf-overview', title: '土量', tone: 'bg-slate-700', metrics: [metric('切土(地山)', cutVol, 'm3'), metric('切土(ほぐし)', cutVolumeLoose, 'm3'), metric('盛土(締固め後)', fillVol, 'm3'), metric('流用土量', reuseVolume, 'm3'), metric('残土搬出', disposalVolume, 'm3'), metric('外部搬入', importVolume, 'm3')] },
+      { id: 'cf-cost', title: '費用', tone: 'bg-blue-600', metrics: [metric('切土費', cutTotalCost, '円', 'currency'), metric('搬出費', disposalCost, '円', 'currency'), metric('盛土費', fillTotalCost, '円', 'currency'), metric('法面保護費', slopeProtectionCost, '円', 'currency'), metric('合計', cutTotalCost + disposalCost + fillTotalCost + slopeProtectionCost, '円', 'currency')] },
+    ],
+    lineItems,
+    priceEvidence: [],
+  }), block, context), block, context);
+}
+
 export function calculate(block: EstimateBlock, options?: CalculationOptions): CalculationResult {
   switch (block.blockType) {
     case 'retaining_wall':
       return calculateRetainingWall(block, options);
+    case 'exterior_work':
+      return calculateExteriorWork(block, options);
+    case 'formwork':
+      return calculateFormwork(block, options);
+    case 'concrete_slab':
+      return calculateConcreteSlab(block, options);
+    case 'fence':
+      return calculateFence(block, options);
+    case 'block_installation':
+      return calculateBlockInstallation(block, options);
+    case 'formwork_block':
+      return calculateFormworkBlock(block, options);
+    case 'structure_installation':
+      return calculateStructureInstallation(block, options);
+    case 'self_funded_work':
+      return calculateSelfFundedWork(block, options);
+    case 'cut_fill':
+      return calculateCutFill(block, options);
     case 'pavement':
       return calculatePavement(block, options);
     case 'demolition':

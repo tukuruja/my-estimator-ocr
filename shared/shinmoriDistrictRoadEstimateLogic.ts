@@ -146,6 +146,15 @@ export const SHINMORI_DISTRICT_ROAD_ESTIMATE_LOGIC: DistrictRoadEstimateLogicPro
         ],
       },
     ],
+    exterior_work: [],
+    formwork: [],
+    concrete_slab: [],
+    fence: [],
+    block_installation: [],
+    formwork_block: [],
+    structure_installation: [],
+    self_funded_work: [],
+    cut_fill: [],
   },
 };
 

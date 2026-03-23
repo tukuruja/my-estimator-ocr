@@ -115,6 +115,15 @@ export const SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC: ExteriorEstimateLogicProfile = {
         workbookExamples: ['255.3m2 × 0.15 = 38.3m3', '(209.8-158.7)×1.1 = 56.2m3'],
       },
     ],
+    exterior_work: [],
+    formwork: [],
+    concrete_slab: [],
+    fence: [],
+    block_installation: [],
+    formwork_block: [],
+    structure_installation: [],
+    self_funded_work: [],
+    cut_fill: [],
   },
 };
 

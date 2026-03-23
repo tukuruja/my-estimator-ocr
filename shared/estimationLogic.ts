@@ -142,6 +142,15 @@ const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
   demolition: '撤去工',
   count_structure: '街渠桝・接続桝工',
   material_takeoff: '材料数量監査',
+  exterior_work: '外構工',
+  formwork: '型枠工',
+  concrete_slab: 'コンクリート床版工',
+  fence: 'フェンス工',
+  block_installation: 'ブロック積工',
+  formwork_block: '型枠ブロック工',
+  structure_installation: '構造物設置工',
+  self_funded_work: '自主施工工',
+  cut_fill: '切土・盛土工',
 };
 
 const REQUIRED_FIELDS_BY_BLOCK_TYPE: Record<BlockType, Array<keyof EstimateBlock>> = {
@@ -151,6 +160,15 @@ const REQUIRED_FIELDS_BY_BLOCK_TYPE: Record<BlockType, Array<keyof EstimateBlock
   demolition: ['distance', 'currentHeight', 'plannedHeight'],
   count_structure: ['secondaryProduct', 'countQuantity', 'countUnit'],
   material_takeoff: ['secondaryProduct', 'materialTakeoffMode'],
+  exterior_work: ['distance'],
+  formwork: ['distance', 'formworkArea'],
+  concrete_slab: ['slabArea', 'slabThickness'],
+  fence: ['fenceLength', 'fenceHeight'],
+  block_installation: ['blockArea', 'blockHeight'],
+  formwork_block: ['distance', 'formworkBlockArea'],
+  structure_installation: ['distance'],
+  self_funded_work: ['distance'],
+  cut_fill: ['distance'],
 };
 
 function isEmptyValue(value: unknown): boolean {

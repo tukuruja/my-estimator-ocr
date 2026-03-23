@@ -340,6 +340,214 @@ function MaterialTakeoffFields({ block, onChange }: Pick<InputFormProps, 'block'
   );
 }
 
+function ExteriorWorkFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="施工面積" unit="m²" hint="外構工事の対象面積">
+        <NumberInput value={block.exteriorArea} onChange={(value) => onChange('exteriorArea', Math.max(0, value))} />
+      </FormField>
+      <FormField label="掘削深さ" unit="m" hint="0の場合は砕石厚+コンクリート厚+0.1mで自動算出">
+        <NumberInput value={block.exteriorDepth} onChange={(value) => onChange('exteriorDepth', Math.max(0, value))} />
+      </FormField>
+      <FormField label="仕上材単価" unit="円/m²" hint="タイル・インターロッキング等の仕上げ材料単価">
+        <NumberInput value={block.exteriorFinishUnitPrice} onChange={(value) => onChange('exteriorFinishUnitPrice', Math.max(0, value))} />
+      </FormField>
+    </>
+  );
+}
+
+function FormworkFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="型枠面積" unit="m²" hint="型枠の施工面積">
+        <NumberInput value={block.formworkArea} onChange={(value) => onChange('formworkArea', Math.max(0, value))} />
+      </FormField>
+      <FormField label="型枠種別" hint="基礎=5.0m²/人日, 壁=4.5, スラブ=6.0">
+        <select
+          className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
+          value={block.formworkType}
+          onChange={(e) => onChange('formworkType', e.target.value)}
+        >
+          <option value="foundation">基礎型枠</option>
+          <option value="wall">壁型枠</option>
+          <option value="slab">スラブ型枠</option>
+        </select>
+      </FormField>
+    </>
+  );
+}
+
+function ConcreteSlabFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="施工面積" unit="m²" hint="土間コンクリートの施工面積">
+        <NumberInput value={block.slabArea} onChange={(value) => onChange('slabArea', Math.max(0, value))} />
+      </FormField>
+      <FormField label="コンクリート厚" unit="m" hint="標準0.15m(150mm)">
+        <NumberInput value={block.slabThickness} onChange={(value) => onChange('slabThickness', Math.max(0, value))} />
+      </FormField>
+      <FormField label="砕石厚" unit="m" hint="標準0.10m(100mm)">
+        <NumberInput value={block.slabStoneThickness} onChange={(value) => onChange('slabStoneThickness', Math.max(0, value))} />
+      </FormField>
+      <FormField label="ワイヤーメッシュ" hint="6-150ワイヤーメッシュの有無">
+        <select
+          className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
+          value={block.slabHasWireMesh ? 'yes' : 'no'}
+          onChange={(e) => onChange('slabHasWireMesh', e.target.value === 'yes' ? 'yes' : 'no')}
+        >
+          <option value="yes">あり</option>
+          <option value="no">なし</option>
+        </select>
+      </FormField>
+    </>
+  );
+}
+
+function FenceFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="施工延長" unit="m" hint="フェンスの総延長">
+        <NumberInput value={block.fenceLength} onChange={(value) => onChange('fenceLength', Math.max(0, value))} />
+      </FormField>
+      <FormField label="フェンス高さ" unit="m" hint="標準1.0m/1.2m/1.5m/1.8m">
+        <NumberInput value={block.fenceHeight} onChange={(value) => onChange('fenceHeight', Math.max(0, value))} />
+      </FormField>
+      <FormField label="フェンス種別">
+        <select
+          className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
+          value={block.fenceType}
+          onChange={(e) => onChange('fenceType', e.target.value)}
+        >
+          <option value="mesh">メッシュフェンス</option>
+          <option value="blind">目隠しフェンス</option>
+          <option value="pc">PCフェンス</option>
+        </select>
+      </FormField>
+      <FormField label="支柱間隔" unit="m" hint="標準2.0m">
+        <NumberInput value={block.fencePostInterval} onChange={(value) => onChange('fencePostInterval', Math.max(0.5, value))} />
+      </FormField>
+      <FormField label="支柱単価" unit="円/本">
+        <NumberInput value={block.fencePostUnitPrice} onChange={(value) => onChange('fencePostUnitPrice', Math.max(0, value))} />
+      </FormField>
+      <FormField label="パネル単価" unit="円/枚">
+        <NumberInput value={block.fencePanelUnitPrice} onChange={(value) => onChange('fencePanelUnitPrice', Math.max(0, value))} />
+      </FormField>
+    </>
+  );
+}
+
+function BlockInstallationFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="施工延長" unit="m" hint="ブロック塀の延長">
+        <NumberInput value={block.blockLength} onChange={(value) => onChange('blockLength', Math.max(0, value))} />
+      </FormField>
+      <FormField label="ブロック高さ" unit="m" hint="ブロック塀の高さ">
+        <NumberInput value={block.blockHeight} onChange={(value) => onChange('blockHeight', Math.max(0, value))} />
+      </FormField>
+      <FormField label="ブロック厚" unit="mm" hint="100/120/150/190mm">
+        <select
+          className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
+          value={String(block.blockThickness * 1000)}
+          onChange={(e) => onChange('blockThickness', Number(e.target.value) / 1000)}
+        >
+          <option value="100">CB100</option>
+          <option value="120">CB120</option>
+          <option value="150">CB150</option>
+          <option value="190">CB190</option>
+        </select>
+      </FormField>
+      <FormField label="ブロック単価" unit="円/個" hint="0の場合デフォルト¥250/個">
+        <NumberInput value={block.customUnitPrice} onChange={(value) => onChange('customUnitPrice', Math.max(0, value))} />
+      </FormField>
+    </>
+  );
+}
+
+function FormworkBlockFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="施工延長" unit="m">
+        <NumberInput value={block.formworkBlockLength} onChange={(value) => onChange('formworkBlockLength', Math.max(0, value))} />
+      </FormField>
+      <FormField label="ブロック高さ" unit="m">
+        <NumberInput value={block.formworkBlockHeight} onChange={(value) => onChange('formworkBlockHeight', Math.max(0, value))} />
+      </FormField>
+      <FormField label="ブロック厚" unit="mm" hint="150/190/200mm">
+        <select
+          className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
+          value={String(block.formworkBlockThickness * 1000)}
+          onChange={(e) => onChange('formworkBlockThickness', Number(e.target.value) / 1000)}
+        >
+          <option value="150">CP150</option>
+          <option value="190">CP190</option>
+          <option value="200">CP200</option>
+        </select>
+      </FormField>
+      <FormField label="ブロック単価" unit="円/個" hint="0の場合デフォルト¥450/個">
+        <NumberInput value={block.customUnitPrice} onChange={(value) => onChange('customUnitPrice', Math.max(0, value))} />
+      </FormField>
+    </>
+  );
+}
+
+function StructureInstallationFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="構造物名" className="col-span-2" hint="集水桝、マンホール、ハンドホール等">
+        <TextInput value={block.structureName || block.secondaryProduct} onChange={(value) => { onChange('structureName', value); onChange('secondaryProduct', value); }} placeholder="例: 集水桝600×600" />
+      </FormField>
+      <FormField label="数量" unit={block.structureUnit || '箇所'}>
+        <NumberInput value={block.structureQuantity || block.countQuantity} onChange={(value) => { onChange('structureQuantity', Math.max(0, Math.round(value))); onChange('countQuantity', Math.max(0, Math.round(value))); }} />
+      </FormField>
+      <FormField label="単位">
+        <TextInput value={block.structureUnit || block.countUnit} onChange={(value) => { onChange('structureUnit', value || '箇所'); onChange('countUnit', value || '箇所'); }} placeholder="箇所" />
+      </FormField>
+      <FormField label="材料単価" unit={`円/${block.structureUnit || '箇所'}`} className="col-span-2">
+        <NumberInput value={block.structureUnitPrice || block.customUnitPrice} onChange={(value) => { onChange('structureUnitPrice', Math.max(0, value)); onChange('customUnitPrice', Math.max(0, value)); }} />
+      </FormField>
+    </>
+  );
+}
+
+function SelfFundedWorkFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="工事名称" className="col-span-2" hint="自費工事の内容を記載">
+        <TextInput value={block.selfFundedName} onChange={(value) => onChange('selfFundedName', value)} placeholder="例: 給水管接続工事" />
+      </FormField>
+      <FormField label="数量" unit={block.selfFundedUnit || '式'}>
+        <NumberInput value={block.selfFundedQuantity} onChange={(value) => onChange('selfFundedQuantity', Math.max(0, value))} />
+      </FormField>
+      <FormField label="単位">
+        <TextInput value={block.selfFundedUnit} onChange={(value) => onChange('selfFundedUnit', value || '式')} placeholder="式" />
+      </FormField>
+      <FormField label="単価" unit={`円/${block.selfFundedUnit || '式'}`} className="col-span-2">
+        <NumberInput value={block.selfFundedUnitPrice} onChange={(value) => onChange('selfFundedUnitPrice', Math.max(0, value))} />
+      </FormField>
+    </>
+  );
+}
+
+function CutFillFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
+  return (
+    <>
+      <FormField label="切土量(地山)" unit="m³" hint="地山状態での切土体積">
+        <NumberInput value={block.cutVolume} onChange={(value) => onChange('cutVolume', Math.max(0, value))} />
+      </FormField>
+      <FormField label="盛土量(締固め後)" unit="m³" hint="締固め後の仕上がり体積">
+        <NumberInput value={block.fillVolume} onChange={(value) => onChange('fillVolume', Math.max(0, value))} />
+      </FormField>
+      <FormField label="法面高さ" unit="m" hint="法面がある場合の高さ(0=法面なし)">
+        <NumberInput value={block.cutFillSlopeHeight} onChange={(value) => onChange('cutFillSlopeHeight', Math.max(0, value))} />
+      </FormField>
+      <FormField label="法面勾配" hint="1:N のN値(標準1.5)">
+        <NumberInput value={block.cutFillSlopeGradient} onChange={(value) => onChange('cutFillSlopeGradient', Math.max(0.5, value))} />
+      </FormField>
+    </>
+  );
+}
+
 function CommonPricingFields({ block, onChange }: Pick<InputFormProps, 'block' | 'onChange'>) {
   return (
     <div className="space-y-2">
@@ -376,7 +584,7 @@ function CommonPricingFields({ block, onChange }: Pick<InputFormProps, 'block' |
         </div>
       </div>
 
-      {(block.blockType === 'secondary_product' || block.blockType === 'retaining_wall' || block.blockType === 'pavement') && (
+      {(block.blockType === 'secondary_product' || block.blockType === 'retaining_wall' || block.blockType === 'pavement' || block.blockType === 'exterior_work' || block.blockType === 'concrete_slab' || block.blockType === 'block_installation' || block.blockType === 'formwork_block' || block.blockType === 'cut_fill') && (
         <div className="overflow-hidden rounded-md border border-green-300">
           <SectionHeader title="基礎・材料条件" color="bg-green-600" emoji="🧱" />
           <div className="grid grid-cols-2 gap-3 bg-green-50 p-3">
@@ -451,13 +659,21 @@ function SplitExecutionFields({ block, onChange }: Pick<InputFormProps, 'block' 
 }
 
 function ZoneBreakdownFields({ block, onZoneChange, onAddZone, onRemoveZone }: Pick<InputFormProps, 'block' | 'onZoneChange' | 'onAddZone' | 'onRemoveZone'>) {
-  const zoneUnit = block.blockType === 'pavement' || block.blockType === 'demolition'
+  const areaTypes: string[] = ['pavement', 'demolition', 'exterior_work', 'formwork', 'concrete_slab', 'block_installation', 'formwork_block'];
+  const countTypes: string[] = ['count_structure', 'structure_installation'];
+  const volumeTypes: string[] = ['cut_fill'];
+  const customUnitTypes: string[] = ['self_funded_work'];
+  const zoneUnit = areaTypes.includes(block.blockType)
     ? 'm²'
-    : block.blockType === 'count_structure'
-      ? (block.countUnit || '箇所')
-      : block.blockType === 'material_takeoff'
-        ? block.materialTakeoffMode
-        : 'm';
+    : countTypes.includes(block.blockType)
+      ? (block.countUnit || block.structureUnit || '箇所')
+      : volumeTypes.includes(block.blockType)
+        ? 'm³'
+        : customUnitTypes.includes(block.blockType)
+          ? (block.selfFundedUnit || '式')
+          : block.blockType === 'material_takeoff'
+            ? block.materialTakeoffMode
+            : 'm';
 
   return (
     <div className="overflow-hidden rounded-md border border-cyan-300">
@@ -570,6 +786,15 @@ export default function InputForm({ block, onChange, onZoneChange, onAddZone, on
             <WorkTypeSelect block={block} onChange={onChange} />
             {block.blockType === 'secondary_product' && <SecondaryProductFields block={block} onChange={onChange} />}
             {block.blockType === 'retaining_wall' && <RetainingWallFields block={block} onChange={onChange} />}
+            {block.blockType === 'exterior_work' && <ExteriorWorkFields block={block} onChange={onChange} />}
+            {block.blockType === 'formwork' && <FormworkFields block={block} onChange={onChange} />}
+            {block.blockType === 'concrete_slab' && <ConcreteSlabFields block={block} onChange={onChange} />}
+            {block.blockType === 'fence' && <FenceFields block={block} onChange={onChange} />}
+            {block.blockType === 'block_installation' && <BlockInstallationFields block={block} onChange={onChange} />}
+            {block.blockType === 'formwork_block' && <FormworkBlockFields block={block} onChange={onChange} />}
+            {block.blockType === 'structure_installation' && <StructureInstallationFields block={block} onChange={onChange} />}
+            {block.blockType === 'self_funded_work' && <SelfFundedWorkFields block={block} onChange={onChange} />}
+            {block.blockType === 'cut_fill' && <CutFillFields block={block} onChange={onChange} />}
             {block.blockType === 'pavement' && <PavementFields block={block} onChange={onChange} />}
             {block.blockType === 'demolition' && <DemolitionFields block={block} onChange={onChange} />}
             {block.blockType === 'count_structure' && <CountStructureFields block={block} onChange={onChange} />}

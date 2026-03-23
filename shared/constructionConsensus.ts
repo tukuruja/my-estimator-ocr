@@ -638,6 +638,15 @@ const BLOCK_MASTER_TYPES: Record<EstimateBlock['blockType'], MasterType[]> = {
   demolition: ['road', 'machine', 'dump_truck', 'cutter', 'labor', 'misc'],
   count_structure: ['secondary_product', 'misc', 'labor'],
   material_takeoff: ['road', 'crushed_stone', 'misc', 'labor'],
+  exterior_work: ['secondary_product', 'machine', 'dump_truck', 'crushed_stone', 'concrete', 'pump_truck', 'labor', 'misc'],
+  formwork: ['secondary_product', 'machine', 'labor', 'misc'],
+  concrete_slab: ['concrete', 'secondary_product', 'machine', 'pump_truck', 'labor', 'misc'],
+  fence: ['secondary_product', 'machine', 'labor', 'misc'],
+  block_installation: ['secondary_product', 'machine', 'dump_truck', 'crushed_stone', 'labor', 'misc'],
+  formwork_block: ['secondary_product', 'machine', 'labor', 'misc'],
+  structure_installation: ['secondary_product', 'machine', 'labor', 'misc'],
+  self_funded_work: ['secondary_product', 'machine', 'dump_truck', 'crushed_stone', 'concrete', 'labor', 'misc'],
+  cut_fill: ['machine', 'dump_truck', 'labor', 'misc'],
 };
 
 export const CONSTRUCTION_CONSENSUS_BLUEPRINT: ConstructionConsensusBlueprint = {

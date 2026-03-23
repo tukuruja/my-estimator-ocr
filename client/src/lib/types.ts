@@ -3,6 +3,15 @@ export type BoundingBox = [number, number, number, number, number, number, numbe
 export type BlockType =
   | 'secondary_product'
   | 'retaining_wall'
+  | 'exterior_work'
+  | 'formwork'
+  | 'concrete_slab'
+  | 'fence'
+  | 'block_installation'
+  | 'formwork_block'
+  | 'structure_installation'
+  | 'self_funded_work'
+  | 'cut_fill'
   | 'pavement'
   | 'demolition'
   | 'count_structure'
@@ -619,6 +628,52 @@ export interface EstimateBlock {
   // 地盤条件・ほぐし係数（SiteConditionFactors）
   // 空文字 = デフォルト(砂質土 L=1.25)。groundConditions のname値を入れる
   groundCondition: string;
+  // 外構工事
+  exteriorArea: number;
+  exteriorDepth: number;
+  exteriorFinishUnitPrice: number;
+  // 型枠工事
+  formworkArea: number;
+  formworkType: string; // 'foundation' | 'wall' | 'slab'
+  // 土間コンクリ
+  slabArea: number;
+  slabThickness: number;
+  slabStoneThickness: number;
+  slabHasWireMesh: boolean;
+  // フェンス
+  fenceLength: number;
+  fenceHeight: number;
+  fenceType: string; // 'mesh' | 'blind' | 'pc'
+  fencePostInterval: number;
+  fencePostUnitPrice: number;
+  fencePanelUnitPrice: number;
+  // ブロック設置
+  blockArea: number;
+  blockLength: number;
+  blockHeight: number;
+  blockThickness: number; // 100/120/150/190mm
+  // 型枠ブロック
+  formworkBlockArea: number;
+  formworkBlockLength: number;
+  formworkBlockHeight: number;
+  formworkBlockThickness: number;
+  // 構造物設置 (既存count_structureを拡張)
+  structureName: string;
+  structureQuantity: number;
+  structureUnit: string;
+  structureUnitPrice: number;
+  // 自費工事
+  selfFundedName: string;
+  selfFundedQuantity: number;
+  selfFundedUnit: string;
+  selfFundedUnitPrice: number;
+  // 切盛土
+  cutVolume: number;
+  fillVolume: number;
+  cutFillSoilType: string;
+  cutFillDisposalDistance: number;
+  cutFillSlopeHeight: number;
+  cutFillSlopeGradient: number;
   zones: EstimateZone[];
   requiresReviewFields: string[];
   appliedCandidateIds: string[];
@@ -917,6 +972,52 @@ export function createDefaultBlock(projectId: string, name: string = '新規見�
     temporaryRestorationRate: 0,
     coordinationAdjustmentRate: 0,
     groundCondition: '',      // 空文字 = 砂質土標準（L=1.25）
+    // 外構工事
+    exteriorArea: 0,
+    exteriorDepth: 0,
+    exteriorFinishUnitPrice: 0,
+    // 型枠工事
+    formworkArea: 0,
+    formworkType: 'foundation',
+    // 土間コンクリ
+    slabArea: 0,
+    slabThickness: 0.15,
+    slabStoneThickness: 0.10,
+    slabHasWireMesh: true,
+    // フェンス
+    fenceLength: 0,
+    fenceHeight: 1.0,
+    fenceType: 'mesh',
+    fencePostInterval: 2.0,
+    fencePostUnitPrice: 0,
+    fencePanelUnitPrice: 0,
+    // ブロック設置
+    blockArea: 0,
+    blockLength: 0,
+    blockHeight: 0,
+    blockThickness: 0.12,
+    // 型枠ブロック
+    formworkBlockArea: 0,
+    formworkBlockLength: 0,
+    formworkBlockHeight: 0,
+    formworkBlockThickness: 0.15,
+    // 構造物設置
+    structureName: '',
+    structureQuantity: 0,
+    structureUnit: '箇所',
+    structureUnitPrice: 0,
+    // 自費工事
+    selfFundedName: '',
+    selfFundedQuantity: 0,
+    selfFundedUnit: '式',
+    selfFundedUnitPrice: 0,
+    // 切盛土
+    cutVolume: 0,
+    fillVolume: 0,
+    cutFillSoilType: '',
+    cutFillDisposalDistance: 0,
+    cutFillSlopeHeight: 0,
+    cutFillSlopeGradient: 1.5,
     zones: [],
     requiresReviewFields: [],
     appliedCandidateIds: [],
