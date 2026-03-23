@@ -503,3 +503,146 @@ export async function fetchEstimationLogicAuditLogs(limit: number = 20): Promise
     throw new Error(getServerApiUnavailableMessage());
   }
 }
+
+// ─── OCR Enhancement API (Gemini Vision) ─────────────────────────────────────
+
+export interface OcrEnhanceAnalysisResult {
+  drawingType: string;
+  scale: string | null;
+  dimensions: Array<{ label: string; value: string; unit: string }>;
+  materials: Array<{ name: string; specification: string; quantity: string; unit: string }>;
+  annotations: string[];
+  confidence: number;
+  rawResponse: string;
+}
+
+export interface OcrEnhanceQuantityResult {
+  items: Array<{
+    name: string;
+    specification: string;
+    quantity: number;
+    unit: string;
+    source: string;
+    confidence: number;
+  }>;
+  rawResponse: string;
+}
+
+export interface OcrEnhanceCandidateValidation {
+  original: string;
+  corrected: string;
+  confidence: number;
+  reason: string;
+}
+
+/**
+ * Gemini Vision で図面画像を解析し、図面種別・寸法・材料を抽出する
+ */
+export async function analyzeDrawingWithVision(params: {
+  imageBase64: string;
+  mimeType: string;
+  ocrText?: string;
+  drawingContext?: string;
+}): Promise<OcrEnhanceAnalysisResult> {
+  try {
+    const response = await fetch(resolveAppApiUrl('/api/ocr-enhance/analyze'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getWorkspaceHeaders() },
+      body: JSON.stringify(params),
+    });
+    await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), '図面AI解析に失敗しました。');
+    const payload = await response.json() as { data?: OcrEnhanceAnalysisResult };
+    if (!payload.data) throw new Error('図面AI解析の結果が空です。');
+    return payload.data;
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {
+        throw new Error(getServerApiUnavailableMessage());
+      }
+      throw error;
+    }
+    throw new Error(getServerApiUnavailableMessage());
+  }
+}
+
+/**
+ * Gemini Vision で図面から数量を自動抽出する
+ */
+export async function extractQuantitiesWithVision(params: {
+  imageBase64: string;
+  mimeType: string;
+  ocrText?: string;
+  drawingType?: string;
+}): Promise<OcrEnhanceQuantityResult> {
+  try {
+    const response = await fetch(resolveAppApiUrl('/api/ocr-enhance/extract-quantities'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getWorkspaceHeaders() },
+      body: JSON.stringify(params),
+    });
+    await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), '数量抽出に失敗しました。');
+    const payload = await response.json() as { data?: OcrEnhanceQuantityResult };
+    if (!payload.data) throw new Error('数量抽出の結果が空です。');
+    return payload.data;
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {
+        throw new Error(getServerApiUnavailableMessage());
+      }
+      throw error;
+    }
+    throw new Error(getServerApiUnavailableMessage());
+  }
+}
+
+/**
+ * OCR候補テキストをAIで検証・補正する
+ */
+export async function validateCandidatesWithAi(params: {
+  candidates: Array<{ text: string; confidence: number }>;
+  imageBase64?: string;
+  mimeType?: string;
+}): Promise<OcrEnhanceCandidateValidation[]> {
+  try {
+    const response = await fetch(resolveAppApiUrl('/api/ocr-enhance/validate'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getWorkspaceHeaders() },
+      body: JSON.stringify(params),
+    });
+    await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), 'OCR候補検証に失敗しました。');
+    const payload = await response.json() as { data?: OcrEnhanceCandidateValidation[] };
+    return Array.isArray(payload.data) ? payload.data : [];
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {
+        throw new Error(getServerApiUnavailableMessage());
+      }
+      throw error;
+    }
+    throw new Error(getServerApiUnavailableMessage());
+  }
+}
+
+/**
+ * OCRテキストに建設用語辞書と数値補正を適用する
+ */
+export async function correctOcrText(lines: string[]): Promise<string[]> {
+  try {
+    const response = await fetch(resolveAppApiUrl('/api/ocr-enhance/correct-text'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getWorkspaceHeaders() },
+      body: JSON.stringify({ lines }),
+    });
+    await ensureJsonApiResponse(response, getServerApiUnavailableMessage(), 'OCRテキスト補正に失敗しました。');
+    const payload = await response.json() as { data?: string[] };
+    return Array.isArray(payload.data) ? payload.data : lines;
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'Failed to fetch' && isLikelyHostedPreview()) {
+        throw new Error(getServerApiUnavailableMessage());
+      }
+      throw error;
+    }
+    throw new Error(getServerApiUnavailableMessage());
+  }
+}

@@ -10,6 +10,7 @@ import { createOcrLearningApiMiddleware } from "./ocrLearningApi";
 import { createOcrPackApiMiddleware } from "./ocrPackApi";
 import { createReportApiMiddleware } from "./reportApi";
 import { createGmailApiMiddleware } from "./gmailApi";
+import { createOcrEnhanceApiMiddleware } from "./ocrEnhanceApi";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,6 +68,7 @@ async function startServer() {
   app.use(createMasterApiMiddleware());
   app.use(createReportApiMiddleware());
   app.use(createGmailApiMiddleware());
+  app.use(createOcrEnhanceApiMiddleware());
   app.use(createAppStateApiMiddleware());
 
   if (process.env.API_ONLY === "true") {

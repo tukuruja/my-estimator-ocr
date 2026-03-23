@@ -21,6 +21,7 @@ import {
   calculatePolygonAreaPixels,
 } from '@/lib/ocrMeasurements';
 import {
+  correctOcrText,
   fetchMasters,
   fetchOcrLearningEntries,
   generateReport,
@@ -1776,6 +1777,22 @@ export default function Home({ preferredBlockType }: HomeProps) {
         masters,
         new Date().toISOString().slice(0, 10),
       );
+
+      // 建設用語辞書によるOCRテキスト自動補正を適用
+      if (parsedDrawing.ocrItems.length > 0) {
+        try {
+          const originalTexts = parsedDrawing.ocrItems.map((item) => item.text);
+          const correctedTexts = await correctOcrText(originalTexts);
+          for (let i = 0; i < parsedDrawing.ocrItems.length; i++) {
+            if (correctedTexts[i] && correctedTexts[i] !== parsedDrawing.ocrItems[i].text) {
+              parsedDrawing.ocrItems[i] = { ...parsedDrawing.ocrItems[i], text: correctedTexts[i] };
+            }
+          }
+        } catch {
+          // 補正APIが失敗しても元のOCRテキストで続行
+        }
+      }
+
       const nextDrawing = rebuildDrawingCandidates(parsedDrawing, activeBlock, masters, effectiveDate);
       const autoBlocks = buildAutoBlocksFromCadStructured(activeProject.id, activeProject.blocks, nextDrawing);
 

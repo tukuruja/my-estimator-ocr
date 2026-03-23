@@ -1,5 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { FileSearch, LoaderCircle, Upload } from 'lucide-react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { BrainCircuit, FileSearch, LoaderCircle, Upload } from 'lucide-react';
 import {
   findPageCalibration,
   describeDistanceMeasurement,
@@ -15,6 +15,13 @@ import type {
   DrawingPolygonMeasurement,
   OcrItem,
 } from '@/lib/types';
+import {
+  analyzeDrawingWithVision,
+  extractQuantitiesWithVision,
+  correctOcrText,
+  type OcrEnhanceAnalysisResult,
+  type OcrEnhanceQuantityResult,
+} from '@/lib/api';
 import OcrCanvas from './OcrCanvas';
 import OcrLineList from './OcrLineList';
 import CandidatePanel from './CandidatePanel';
@@ -176,6 +183,12 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
+  // ─── AI図面解析 state ────────────────────────────────────────────────
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiAnalysisResult, setAiAnalysisResult] = useState<OcrEnhanceAnalysisResult | null>(null);
+  const [aiQuantityResult, setAiQuantityResult] = useState<OcrEnhanceQuantityResult | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+
   useImperativeHandle(ref, () => ({
     focusPanel() {
       panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -213,6 +226,59 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
 
   const activeCandidate = activeDrawing?.aiCandidates.find((candidate) => candidate.id === activeCandidateId) ?? null;
   const activeItem = activeDrawing?.ocrItems.find((item) => item.id === activeOcrItemId) ?? null;
+
+  const handleAiAnalyze = useCallback(async () => {
+    if (!activeDrawing || aiAnalyzing) return;
+    const page = activeDrawing.pages.find((p) => p.pageNo === selectedPageNo);
+    if (!page?.imageUrl) return;
+
+    setAiAnalyzing(true);
+    setAiError(null);
+    setAiAnalysisResult(null);
+    setAiQuantityResult(null);
+
+    try {
+      // ページ画像をbase64に変換
+      const imgResponse = await fetch(page.imageUrl);
+      const blob = await imgResponse.blob();
+      const mimeType = blob.type || 'image/png';
+      const arrayBuffer = await blob.arrayBuffer();
+      const base64 = btoa(
+        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), ''),
+      );
+
+      // 現在のOCRテキストを収集
+      const pageOcrItems = activeDrawing.ocrItems.filter((item) => item.pageNo === selectedPageNo);
+      const ocrText = pageOcrItems.map((item) => item.text).join('\n');
+
+      // まずOCRテキスト補正を適用
+      const correctedLines = ocrText ? await correctOcrText(ocrText.split('\n')) : [];
+      const correctedText = correctedLines.join('\n');
+
+      // 並列で図面解析と数量抽出を実行
+      const [analysisResult, quantityResult] = await Promise.all([
+        analyzeDrawingWithVision({
+          imageBase64: base64,
+          mimeType,
+          ocrText: correctedText || undefined,
+          drawingContext: activeDrawing.drawingTitle || activeDrawing.name,
+        }),
+        extractQuantitiesWithVision({
+          imageBase64: base64,
+          mimeType,
+          ocrText: correctedText || undefined,
+          drawingType: activeDrawing.sheetClassification?.sheetTypeName,
+        }),
+      ]);
+
+      setAiAnalysisResult(analysisResult);
+      setAiQuantityResult(quantityResult);
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'AI解析に失敗しました');
+    } finally {
+      setAiAnalyzing(false);
+    }
+  }, [activeDrawing, selectedPageNo, aiAnalyzing]);
 
   useEffect(() => {
     if (activeCandidate) {
@@ -307,6 +373,18 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
               {isUploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
               {isUploading ? (uploadStatusMessage || 'OCR解析中...') : '図面をアップロード'}
             </button>
+            {activeDrawing && activeDrawing.status === 'ready' && (
+              <button
+                type="button"
+                onClick={handleAiAnalyze}
+                disabled={aiAnalyzing}
+                className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                title="Gemini Visionで図面をAI解析し、数量・材料を自動抽出します"
+              >
+                {aiAnalyzing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
+                {aiAnalyzing ? 'AI解析中...' : 'AI図面解析'}
+              </button>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -548,6 +626,136 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
               })}
             </div>
           </div>
+
+          {/* ── AI図面解析結果パネル ── */}
+          {aiError && (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              AI解析エラー: {aiError}
+            </div>
+          )}
+
+          {aiAnalyzing && (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+                Gemini Vision で図面を解析中...
+              </div>
+              <div className="mt-1 text-xs text-emerald-600">
+                図面種別の判定、寸法・材料の読み取り、数量の自動抽出を実行しています。
+              </div>
+            </div>
+          )}
+
+          {aiAnalysisResult && (
+            <div className="rounded-md border border-emerald-200 bg-white px-3 py-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+                <BrainCircuit className="h-4 w-4" />
+                AI図面解析結果
+                <span className="ml-auto rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                  信頼度 {Math.round(aiAnalysisResult.confidence * 100)}%
+                </span>
+              </div>
+
+              <div className="mt-2 space-y-2">
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                  <span className="font-semibold text-slate-800">図面種別:</span>{' '}
+                  <span className="text-slate-700">{aiAnalysisResult.drawingType}</span>
+                  {aiAnalysisResult.scale && (
+                    <>
+                      <span className="mx-2 text-slate-300">|</span>
+                      <span className="font-semibold text-slate-800">縮尺:</span>{' '}
+                      <span className="text-slate-700">{aiAnalysisResult.scale}</span>
+                    </>
+                  )}
+                </div>
+
+                {aiAnalysisResult.dimensions.length > 0 && (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">寸法情報</div>
+                    <div className="mt-1 space-y-1">
+                      {aiAnalysisResult.dimensions.map((dim, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs text-slate-700">
+                          <span className="font-semibold">{dim.label}:</span>
+                          <span>{dim.value} {dim.unit}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {aiAnalysisResult.materials.length > 0 && (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">材料情報</div>
+                    <div className="mt-1 space-y-1">
+                      {aiAnalysisResult.materials.map((mat, i) => (
+                        <div key={i} className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
+                          <span className="font-semibold">{mat.name}</span>
+                          {mat.specification && <span className="text-slate-500">({mat.specification})</span>}
+                          <span className="ml-auto">{mat.quantity} {mat.unit}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {aiAnalysisResult.annotations.length > 0 && (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">注記・特記事項</div>
+                    <div className="mt-1 space-y-1">
+                      {aiAnalysisResult.annotations.map((note, i) => (
+                        <div key={i} className="text-xs text-slate-700">- {note}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {aiQuantityResult && aiQuantityResult.items.length > 0 && (
+            <div className="rounded-md border border-blue-200 bg-white px-3 py-3">
+              <div className="text-sm font-semibold text-blue-800">
+                AI数量抽出結果
+                <span className="ml-2 text-[11px] font-normal text-blue-500">
+                  ({aiQuantityResult.items.length}項目)
+                </span>
+              </div>
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-blue-100 text-left text-[11px] font-semibold text-blue-600">
+                      <th className="pb-1 pr-3">名称</th>
+                      <th className="pb-1 pr-3">規格</th>
+                      <th className="pb-1 pr-3 text-right">数量</th>
+                      <th className="pb-1 pr-3">単位</th>
+                      <th className="pb-1 pr-3">根拠</th>
+                      <th className="pb-1 text-right">信頼度</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aiQuantityResult.items.map((item, i) => (
+                      <tr key={i} className="border-b border-slate-100 text-slate-700">
+                        <td className="py-1.5 pr-3 font-semibold">{item.name}</td>
+                        <td className="py-1.5 pr-3 text-slate-500">{item.specification || '-'}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{item.quantity}</td>
+                        <td className="py-1.5 pr-3">{item.unit}</td>
+                        <td className="py-1.5 pr-3 text-slate-500">{item.source}</td>
+                        <td className="py-1.5 text-right">
+                          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                            item.confidence >= 0.8 ? 'bg-emerald-100 text-emerald-700'
+                            : item.confidence >= 0.5 ? 'bg-amber-100 text-amber-700'
+                            : 'bg-rose-100 text-rose-700'
+                          }`}>
+                            {Math.round(item.confidence * 100)}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid min-h-0 gap-3 xl:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_auto]">
