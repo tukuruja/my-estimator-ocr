@@ -652,6 +652,13 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
   const cementAmount = cement * context.cementUnitPrice;
   const water = mortar * 0.1 * 1000;
 
+  // BUG-4修正: 端数処理ロジックの根拠をコメントで明記
+  // 二次製品（側溝・U字溝・管渠等）の本数計算における業界慣行:
+  //   - rawCount = (施工延長 ÷ 製品1本の長さ) × 段数
+  //   - 端数が0.49以下の場合: 切り捨て + 2本（両端カット代 + 現場合わせ予備）
+  //     → 二次製品は現場で両端を切断加工するため、切断ロス分として+2本が標準
+  //   - 端数が0.50以上の場合: 切り上げ（ほぼ1本分なのでカット代不要）
+  // この端数処理は国交省積算基準における二次製品数量算出の実務慣行に準拠
   let productCount = 0;
   if (productLengthValue > 0) {
     const rawCount = (distance / productLengthValue) * stages;
@@ -772,10 +779,10 @@ function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptio
   const laborCost = context.laborCost;
   const wallTypeFactor = /重力/.test(block.secondaryProduct) ? 0.65 : /逆T/i.test(block.secondaryProduct) ? 0.38 : /L型/i.test(block.secondaryProduct) ? 0.34 : 0.45;
 
-  // ほぐし係数L: 擁壁工はデフォルト1.2（やや硬質地盤）。地盤条件指定がある場合はそちらを優先
-  const soilL = block.groundCondition
-    ? getLooseningFactor(block.groundCondition)
-    : 1.20;
+  // BUG-2修正: ほぐし係数Lを常にgetLooseningFactor()経由で取得（統一管理）
+  // groundCondition未設定時はgetLooseningFactor内で砂質土標準1.25がデフォルト適用される
+  // 以前は未設定時に1.20固定だったが、priceData.tsの基準テーブルと不一致だった
+  const soilL = getLooseningFactor(block.groundCondition || '');
 
   const excavationWidth = baseWidth + 1.0;
   const excavationHeight = wallHeight + baseThickness + stoneThickness;
@@ -931,7 +938,13 @@ function calculatePavement(block: EstimateBlock, options?: CalculationOptions): 
   const surfaceAmount = area * surfaceUnitPrice;
   const binderAmount = area * binderUnitPrice;
   const roadBaseAmount = area * roadBaseUnitPrice;
-  const subBaseLabor = area > 0 ? Math.ceil(area / 120) * laborCost : 0;
+  // BUG-1修正: 下層路盤の敷均し・転圧歩掛を舗装種別ごとに設定（国交省土木積算基準準拠）
+  // アスファルト舗装: 120m²/人日, コンクリート舗装: 80m²/人日, 簡易舗装: 150m²/人日
+  const pavementType = (block.secondaryProduct || '').toLowerCase();
+  const subBaseWorkerCapacity = /コンクリート|con/i.test(pavementType) ? 80
+    : /簡易|砂利|gravel/i.test(pavementType) ? 150
+    : 120; // アスファルト舗装（デフォルト）
+  const subBaseLabor = area > 0 ? Math.ceil(area / subBaseWorkerCapacity) * laborCost : 0;
   const subBaseAmount = subBaseVolume * subBaseUnitPrice + subBaseLabor;
   const cutterAmount = cutterLength * cutterUnitPrice;
 
@@ -1114,7 +1127,11 @@ function calculateMaterialTakeoff(block: EstimateBlock, options?: CalculationOpt
   const area = Math.max(0, block.materialArea || 0);
   const thickness = Math.max(0, block.materialThickness || 0);
   const factor = block.materialVolumeFactor > 0 ? block.materialVolumeFactor : 1;
-  const density = Math.max(0, block.materialDensity || 0);
+  // BUG-3修正: density=0のときmode='t'で数量が0になる問題
+  // デフォルト2.3t/m³（コンクリート標準密度）を適用し、警告用フラグも設定
+  const rawDensity = Math.max(0, block.materialDensity || 0);
+  const densityDefaultApplied = mode === 't' && rawDensity === 0;
+  const density = densityDefaultApplied ? 2.3 : rawDensity; // 2.3t/m³ = コンクリート標準密度
   const directQuantity = Math.max(0, block.materialDirectQuantity || 0);
   const rawVolume = area > 0 && thickness > 0 ? area * thickness : 0;
   const adjustedVolume = rawVolume * factor;
@@ -1141,7 +1158,7 @@ function calculateMaterialTakeoff(block: EstimateBlock, options?: CalculationOpt
       itemName: displayName,
       specification: directQuantity > 0
         ? `直接数量 ${directQuantity}${mode}`
-        : `面積${round2(area)}m2 × 厚み${round2(thickness)}m × 係数${round2(factor)}${mode === 't' ? ` × 密度${round2(density)}t/m3` : ''}`,
+        : `面積${round2(area)}m2 × 厚み${round2(thickness)}m × 係数${round2(factor)}${mode === 't' ? ` × 密度${round2(density)}t/m3${densityDefaultApplied ? '【※密度未設定のためコンクリート標準2.3t/m³を適用】' : ''}` : ''}`,
       quantity: primaryQuantity,
       unit: mode,
       unitPrice,
