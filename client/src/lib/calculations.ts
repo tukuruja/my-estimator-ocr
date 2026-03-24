@@ -28,6 +28,57 @@ import { createSeedMasterItems, findMasterByName } from './masterData';
 const SEED_MASTERS = createSeedMasterItems();
 const DEFAULT_EFFECTIVE_DATE = '2026-03-12';
 
+/**
+ * 寸法値をメートル単位に正規化する関数
+ * ユーザーがmm単位(例: 345)やcm単位(例: 34.5)で入力した場合を自動検出してmに変換
+ *
+ * 判定基準（二次製品・擁壁等の断面寸法向け）:
+ *   - 10以上     → mm入力と判断 → ÷1000
+ *   - 1以上10未満 → cm入力と判断 → ÷100（ただし現実的に1〜3m程度はm入力の可能性もあるため閾値は製品タイプに依存）
+ *   - 1未満      → m入力と判断  → そのまま
+ *
+ * contextHint: 'product'(二次製品寸法), 'wall'(擁壁高さ), 'thickness'(厚み)
+ */
+/**
+ * バックホー標準日当たり施工量（地山m³/日）- 国交省土木工事積算基準準拠
+ * 普通土・掘削積込み（バケット容量別）
+ * ※ 二次製品据付のような小規模掘削は市街地制約で60〜70%に低下
+ */
+function getStandardDailyExcavation(capacity: number): number {
+  if (capacity <= 0.07) return 12;  // 0.07m³級: 12m³/日
+  if (capacity <= 0.10) return 18;  // 0.10m³級: 18m³/日
+  if (capacity <= 0.12) return 22;  // 0.12m³級: 22m³/日
+  if (capacity <= 0.15) return 28;  // 0.15m³級: 28m³/日
+  if (capacity <= 0.20) return 38;  // 0.20m³級: 38m³/日
+  if (capacity <= 0.25) return 50;  // 0.25m³級: 50m³/日
+  if (capacity <= 0.40) return 75;  // 0.40m³級: 75m³/日
+  if (capacity <= 0.45) return 85;  // 0.45m³級: 85m³/日
+  if (capacity <= 0.70) return 120; // 0.70m³級: 120m³/日
+  return 150;
+}
+
+function normalizeToMeters(value: number, contextHint: 'product' | 'wall' | 'thickness' = 'product'): number {
+  if (value <= 0) return 0;
+  if (contextHint === 'product') {
+    // 二次製品: 幅・高さは通常0.05m〜2.0m。10以上はmm入力
+    if (value >= 10) return value / 1000;
+    // 1.0〜9.99はcm入力の可能性が高い（5cmの製品はないが5mの製品もまずない）
+    // ただし擁壁等で2.0mはあり得るので、productのみ厳しく判定
+    if (value >= 3.0) return value / 100;
+    return value;
+  }
+  if (contextHint === 'wall') {
+    // 擁壁: 高さは0.5m〜10m程度。100以上はmm入力
+    if (value >= 100) return value / 1000;
+    if (value >= 10) return value / 100;
+    return value;
+  }
+  // thickness: 砕石厚・基礎厚。通常0.05m〜1.0m。1以上はcm/mm
+  if (value >= 100) return value / 1000;
+  if (value >= 1.0) return value / 100;
+  return value;
+}
+
 type CalculationOptions = {
   masters?: PriceMasterItem[];
   effectiveDate?: string;
@@ -579,11 +630,12 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
   const plannedHeight = block.plannedHeight || 0;
   const laborCost = context.laborCost;
   const stages = block.stages || 1;
-  const crushedStoneThickness = block.crushedStoneThickness || 0;
-  const baseThickness = block.baseThickness || 0;
+  // 寸法の単位正規化（ユーザーがmm/cm入力した場合を自動補正）
+  const crushedStoneThickness = normalizeToMeters(block.crushedStoneThickness || 0, 'thickness');
+  const baseThickness = normalizeToMeters(block.baseThickness || 0, 'thickness');
   const formworkCost = block.formworkCost || 0;
-  const productWidth = block.productWidth || 0;
-  const productHeight = block.productHeight || 0;
+  const productWidth = normalizeToMeters(block.productWidth || 0, 'product');
+  const productHeight = normalizeToMeters(block.productHeight || 0, 'product');
   const installLaborCost = block.installLaborCost || laborCost;
   const sandCost = block.sandCost || 0;
   const shippingCost = block.shippingCost || 0;
@@ -596,40 +648,73 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
   // ほぐし係数L: 地盤条件から取得（空文字の場合はデフォルト砂質土 1.25）
   const soilL = getLooseningFactor(block.groundCondition || '');
 
+  // === 掘削断面計算（国交省土木積算基準準拠） ===
+  // 掘削幅 = 製品幅 + 両側余裕0.2m×2 = 製品幅 + 0.4m
   const excavationWidth = productWidth + 0.4;
-  const excavationHeight = currentHeight - plannedHeight + productHeight + crushedStoneThickness + baseThickness;
-  const excavationVolume = excavationWidth * excavationHeight * distance * soilL;
+  // 掘削深さ = (現況高−計画高) + 製品高さ + 砕石厚 + ベース厚
+  // ※ currentHeight/plannedHeight はGL値。差分が床付けまでの切土量
+  const cutDepth = Math.max(currentHeight - plannedHeight, 0);
+  const excavationHeight = cutDepth + productHeight + crushedStoneThickness + baseThickness;
+  // 地山土量 = 断面積 × 延長（ほぐし係数は掘削後の体積に適用）
+  const excavationNaturalVolume = excavationWidth * excavationHeight * distance;
+  // ほぐし土量 = 地山土量 × ほぐし係数L（ダンプ積載・搬出はほぐし土量）
+  const excavationVolume = excavationNaturalVolume * soilL;
+
+  // === 掘削日数・人工（国交省歩掛準拠） ===
+  // 4時間掘削量 = 機械容量ベースの標準掘削量（地山ベース）
   const fourHourExcavation = context.machineCapacity > 0
-    ? getFourHourExcavationCoefficient(context.machineCapacity) * context.machineCapacity
+    ? getStandardDailyExcavation(context.machineCapacity)
     : 0;
-  const excavationDays = fourHourExcavation > 0 ? Math.ceil(excavationVolume / fourHourExcavation) : 0;
-  const excavationDailyWorkers = distance > 0 ? Math.ceil(distance / 15) + 2 : 0;
+  const excavationDays = fourHourExcavation > 0 ? Math.ceil(excavationNaturalVolume / fourHourExcavation) : Math.max(1, Math.ceil(distance / 20));
+  // 掘削作業班: 機械オペ1名 + 手元1名（二次製品据付は通常小規模）
+  const excavationDailyWorkers = 2;
   const excavationWorkers = excavationDays * excavationDailyWorkers;
-  const machineAmount = excavationDays * context.machineUnitPrice * 2;
+  const machineAmount = excavationDays * context.machineUnitPrice;
   const excavationConstructionAmount = (excavationWorkers * laborCost) + machineAmount;
 
-  // 埋め戻し量＝（掘削断面積 − 製品断面積）× 延長 × ほぐし係数L
-  const backfillVolume = (excavationWidth * excavationHeight - productWidth * productHeight) * distance * soilL;
-  const backfillDays = fourHourExcavation > 0 ? Math.ceil(backfillVolume / fourHourExcavation) : 0;
-  const backfillWorkers = distance > 0 ? 1 + Math.floor(backfillVolume / 2) : 0;
-  const backfillLaborCost = distance > 0 ? backfillWorkers * laborCost : 0;
+  // === 埋め戻し（国交省基準: 製品周囲を埋め戻す） ===
+  // 埋め戻し体積 = (掘削断面 - 製品断面 - 砕石断面 - ベース断面) × 延長
+  const productCrossSection = productWidth * productHeight * stages;
+  const stoneCrossSection = excavationWidth * crushedStoneThickness;
+  const baseCrossSection = (productWidth + 0.1) * baseThickness;
+  const backfillNaturalVolume = Math.max(
+    (excavationWidth * excavationHeight - productCrossSection - stoneCrossSection - baseCrossSection) * distance,
+    0,
+  );
+  // 埋め戻し時は締固め後の体積なので、ほぐし土量ではなく締固め係数Cを適用
+  const compactionFactor = 0.9; // 締固め係数C（砂質土標準）
+  const backfillVolume = backfillNaturalVolume * compactionFactor;
+  // 埋め戻し歩掛: 人力タンパ 3.5m³/人日（国交省標準）
+  const backfillProductivity = 3.5;
+  const backfillWorkers = backfillVolume > 0 ? Math.ceil(backfillVolume / backfillProductivity) : 0;
+  const backfillLaborCost = backfillWorkers * laborCost;
 
-  const soilRemovalVolume = Math.max(excavationVolume - backfillVolume, 0);
-  const soilRemovalDays = fourHourExcavation > 0 ? Math.ceil(soilRemovalVolume / fourHourExcavation) : 0;
+  // === 残土搬出 ===
+  // 残土量 = 掘削ほぐし土量 - 埋め戻し必要量（ほぐし換算）
+  const backfillLooseVolume = backfillNaturalVolume * soilL;
+  const soilRemovalVolume = Math.max(excavationVolume - backfillLooseVolume, 0);
+  // ダンプ延べ台数 = 残土量 ÷ ダンプ積載量
   const dumpCount = context.dumpCapacity > 0 ? Math.ceil(soilRemovalVolume / context.dumpCapacity) : 0;
-  // 常用ダンプ台数＝1日に必要な台数（延べ台数÷搬出日数）。fourHourExcavation÷2 で割るのは次元不整合
-  const regularDumpCount = soilRemovalDays > 0 && context.dumpCapacity > 0 ? Math.ceil(dumpCount / soilRemovalDays) : 0;
-  const regularDumpUnitPrice = context.machineUnitPrice * 2;
-  // 残土搬出金額＝常用ダンプ日当 × 台数 × 日数 + 常用ダンプ機械費 + 労務費
-  const soilRemovalAmount = (regularDumpCount * context.dumpVehicleUnitPrice * soilRemovalDays)
-    + (regularDumpCount * regularDumpUnitPrice)
-    + (soilRemovalDays * laborCost);
+  // 搬出日数 = 延べ台数 ÷ 1日稼働台数（距離15km往復想定で1日4〜5往復/台）
+  const tripsPerDayPerDump = 4;
+  const dumpLoadsPerDay = tripsPerDayPerDump; // 1台あたり1日の往復回数
+  const soilRemovalDays = dumpCount > 0 ? Math.ceil(dumpCount / dumpLoadsPerDay) : 0;
+  // 必要ダンプ台数（1日あたり）
+  const regularDumpCount = soilRemovalDays > 0 ? Math.ceil(dumpCount / soilRemovalDays) : 0;
+  // 残土搬出金額 = ダンプ費用 + 積込補助労務
+  const soilRemovalAmount = (dumpCount * context.dumpVehicleUnitPrice)
+    + (soilRemovalDays * laborCost); // 積込補助1名/日
 
+  // === 砕石敷均し・転圧 ===
+  // 砕石体積 = 延長 × 砕石厚 × 掘削幅 × ロス係数1.2
   const crushedStoneVolume = distance * crushedStoneThickness * excavationWidth * 1.2;
-  const crushedStoneWorkers = distance > 0 && excavationWidth > 0 ? Math.ceil((distance * excavationWidth) / 9) : 0;
-  const crushedStoneDays = fourHourExcavation > 0 ? Math.ceil(crushedStoneVolume / fourHourExcavation) : 0;
-  const crushedStoneLaborCost = crushedStoneDays * crushedStoneWorkers * laborCost;
-  const crushedStoneMachineCost = crushedStoneDays * context.machineUnitPrice;
+  // 砕石敷均し歩掛: 8m³/人日（国交省基準、人力タンパ・プレートコンパクタ併用）
+  const stoneProductivity = 8;
+  const crushedStoneWorkers = crushedStoneVolume > 0 ? Math.ceil(crushedStoneVolume / stoneProductivity) : 0;
+  const crushedStoneLaborCost = crushedStoneWorkers * laborCost;
+  // 転圧機械（プレートコンパクタ等）: 砕石日数分
+  const crushedStoneDays = crushedStoneWorkers > 0 ? Math.ceil(crushedStoneWorkers / 2) : 0; // 2名/日体制
+  const crushedStoneMachineCost = crushedStoneDays > 0 ? crushedStoneDays * 5000 : 0; // プレートコンパクタ ¥5,000/日
   const crushedStoneConstructionAmount = crushedStoneLaborCost + crushedStoneMachineCost;
   const crushedStoneMaterialCost = crushedStoneVolume * context.stoneUnitPrice;
   const crushedStoneTotal = crushedStoneConstructionAmount + crushedStoneMaterialCost;
@@ -667,7 +752,16 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
   }
 
   const materialTotalCost = (productCount * context.productUnitPrice) + shippingCost;
-  const installWorkers = Math.ceil(productCount * 0.03 * workabilityFactorValue);
+  // 据付歩掛（国交省基準準拠）:
+  // - 地先境界ブロック・縁石類: 30〜40本/人日 → 1本あたり0.03人日
+  // - U字溝240〜360: 15〜20本/人日 → 1本あたり0.06人日
+  // - 大型側溝・ボックスカルバート: 5〜8本/人日 → 1本あたり0.15人日
+  // workabilityFactor で調整（市街地=1.3, 狭隘部=1.5等）
+  const baseInstallRate = productHeight <= 0.2 ? 0.03    // 小型製品(地先ブロック等)
+    : productHeight <= 0.5 ? 0.06                         // 中型製品(U字溝240等)
+    : productHeight <= 1.0 ? 0.10                          // 中大型(U字溝600等)
+    : 0.15;                                                 // 大型製品(ボックスカルバート等)
+  const installWorkers = Math.ceil(productCount * baseInstallRate * workabilityFactorValue);
   const secondaryProductTotal = sandAmount + cementAmount + materialTotalCost + (installWorkers * installLaborCost);
 
   const lineItems: CalculationLineItem[] = [
@@ -718,11 +812,11 @@ function calculateSecondaryProduct(block: EstimateBlock, options?: CalculationOp
     dumpCount,
     dumpVehicleUnitPrice: context.dumpVehicleUnitPrice,
     regularDumpCount,
-    regularDumpUnitPrice,
+    regularDumpUnitPrice: context.dumpVehicleUnitPrice,
     soilRemovalAmount: Math.round(soilRemovalAmount),
     soilRemovalUnitPerM: distance > 0 ? Math.round(soilRemovalAmount / distance) : 0,
     backfillVolume: round2(backfillVolume),
-    backfillDays,
+    backfillDays: backfillWorkers > 0 ? Math.ceil(backfillWorkers / 2) : 0,
     backfillWorkers,
     backfillLaborCost: Math.round(backfillLaborCost),
     crushedStoneVolume: round2(crushedStoneVolume),
@@ -772,10 +866,10 @@ function calculateRetainingWall(block: EstimateBlock, options?: CalculationOptio
   const context = buildRateContext(block, options);
   const result = emptyResult('retaining_wall', block.secondaryProduct || '擁壁工', 'm');
   const length = block.distance || 0;
-  const wallHeight = block.productHeight || 0;
-  const baseWidth = block.productWidth || 0;
-  const baseThickness = block.baseThickness || 0;
-  const stoneThickness = block.crushedStoneThickness || 0;
+  const wallHeight = normalizeToMeters(block.productHeight || 0, 'wall');
+  const baseWidth = normalizeToMeters(block.productWidth || 0, 'wall');
+  const baseThickness = normalizeToMeters(block.baseThickness || 0, 'thickness');
+  const stoneThickness = normalizeToMeters(block.crushedStoneThickness || 0, 'thickness');
   const laborCost = context.laborCost;
   const wallTypeFactor = /重力/.test(block.secondaryProduct) ? 0.65 : /逆T/i.test(block.secondaryProduct) ? 0.38 : /L型/i.test(block.secondaryProduct) ? 0.34 : 0.45;
 
