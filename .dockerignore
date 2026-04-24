@@ -1,0 +1,8 @@
+.git
+node_modules
+dist
+.vercel
+.manus-logs
+ai_api/.venv
+ai_api/storage
+coverage

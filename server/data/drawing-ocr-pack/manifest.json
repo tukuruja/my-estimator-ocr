@@ -1,0 +1,63 @@
+{
+  "importedAt": "2026-03-18T10:41:23Z",
+  "sourceDir": "/Users/user/Desktop/CODEXスキル/OCR",
+  "outputDir": "/Users/user/work/my-estimator-ocr/server/data/drawing-ocr-pack",
+  "mirroredOutputDirs": [
+    "/Users/user/work/my-estimator-ocr/server/data/drawing-ocr-pack",
+    "/Users/user/work/my-estimator-ocr/ai_api/data/drawing-ocr-pack"
+  ],
+  "missingOptionalFiles": [],
+  "metrics": {
+    "sheetTypeCount": 56,
+    "abbreviationCount": 90,
+    "symbolSeedCount": 38,
+    "knowledgeCount": 69,
+    "fieldDictionaryCount": 101,
+    "promptCount": 15,
+    "skillCount": 15,
+    "reviewQueueCount": 15
+  },
+  "globalPolicy": {
+    "media_priority": [
+      "ifc",
+      "cad",
+      "embedded_text_pdf",
+      "vector_pdf",
+      "raster_pdf",
+      "image"
+    ],
+    "legend_priority": "図面固有凡例 > 標準辞書 > unknown",
+    "document_priority": [
+      "rfi",
+      "site_explanation",
+      "special_spec",
+      "drawing",
+      "standard_spec"
+    ],
+    "confidence_policy": {
+      "auto_accept_min": 0.85,
+      "needs_review_below": 0.75,
+      "block_conditions": [
+        "必須項目欠落",
+        "主要シートの分類不明",
+        "単位未解決",
+        "高重要度conflict残存"
+      ]
+    }
+  },
+  "generatedFiles": {
+    "sheet_type_master": "sheet_type_master.json",
+    "abbreviation_master": "abbreviation_master.json",
+    "symbol_seed_master": "symbol_seed_master.json",
+    "knowledge_master": "knowledge_master.json",
+    "field_dictionary": "field_dictionary.json",
+    "pack_summary": "pack_summary.json",
+    "prompt_definitions": "prompt_definitions.json",
+    "skill_pack": "skill_pack.json",
+    "skill_import": "drawing_ocr_skill_import.csv"
+  },
+  "notes": [
+    "drawing_ocr_skill_import.csv was derived from drawing_ocr_skill_pack.json because the source file was missing.",
+    "CSV columns ending with _json are parsed into arrays/objects in the normalized JSON outputs."
+  ]
+}

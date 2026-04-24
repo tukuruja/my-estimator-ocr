@@ -6,6 +6,7 @@ import path from "node:path";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
 import { createAppStateApiMiddleware } from "./server/appStateApi";
+import { createConsensusApiMiddleware } from "./server/consensusApi";
 import { createMasterApiMiddleware } from "./server/masterApi";
 import { createReportApiMiddleware } from "./server/reportApi";
 
@@ -157,6 +158,7 @@ function vitePluginProjectStateApi(): Plugin {
   return {
     name: "project-state-api",
     configureServer(server) {
+      server.middlewares.use(createConsensusApiMiddleware());
       server.middlewares.use(createMasterApiMiddleware());
       server.middlewares.use(createReportApiMiddleware());
       server.middlewares.use(createAppStateApiMiddleware());

@@ -1,0 +1,557 @@
+[
+  {
+    "symbol_id": "SYM_001",
+    "domain": "共通",
+    "symbol_group": "通り芯",
+    "canonical_name": "grid_bubble",
+    "visual_feature_keywords_json": [
+      "円/六角等のバブルと数字・英字の組合せ"
+    ],
+    "typical_context_json": [
+      "通り芯端部",
+      "平面図"
+    ],
+    "extract_target": "entity:gridline",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_002",
+    "domain": "共通",
+    "symbol_group": "断面記号",
+    "canonical_name": "section_marker",
+    "visual_feature_keywords_json": [
+      "矢印付き円/バブルと断面番号"
+    ],
+    "typical_context_json": [
+      "平面図",
+      "参照図"
+    ],
+    "extract_target": "relation:section_ref",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_003",
+    "domain": "共通",
+    "symbol_group": "詳細記号",
+    "canonical_name": "detail_callout",
+    "visual_feature_keywords_json": [
+      "円/楕円内に詳細番号と参照図番号"
+    ],
+    "typical_context_json": [
+      "平面図",
+      "立面図",
+      "断面図"
+    ],
+    "extract_target": "relation:detail_ref",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_004",
+    "domain": "共通",
+    "symbol_group": "方位記号",
+    "canonical_name": "north_arrow",
+    "visual_feature_keywords_json": [
+      "矢印とN/北"
+    ],
+    "typical_context_json": [
+      "配置図",
+      "平面図"
+    ],
+    "extract_target": "meta:north",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_005",
+    "domain": "共通",
+    "symbol_group": "寸法線",
+    "canonical_name": "dimension_line",
+    "visual_feature_keywords_json": [
+      "両矢印/ティック付き線と数値"
+    ],
+    "typical_context_json": [
+      "平面図",
+      "詳細図"
+    ],
+    "extract_target": "measurement:dimension",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_006",
+    "domain": "建築",
+    "symbol_group": "開き戸記号",
+    "canonical_name": "swing_door",
+    "visual_feature_keywords_json": [
+      "開き円弧付き開口表現"
+    ],
+    "typical_context_json": [
+      "平面図",
+      "展開図"
+    ],
+    "extract_target": "entity:door",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_007",
+    "domain": "建築",
+    "symbol_group": "引戸記号",
+    "canonical_name": "sliding_door",
+    "visual_feature_keywords_json": [
+      "平行移動方向が分かる建具記号"
+    ],
+    "typical_context_json": [
+      "平面図"
+    ],
+    "extract_target": "entity:door",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_008",
+    "domain": "建築",
+    "symbol_group": "窓記号",
+    "canonical_name": "window",
+    "visual_feature_keywords_json": [
+      "壁開口に窓符号が付く表現"
+    ],
+    "typical_context_json": [
+      "平面図",
+      "立面図"
+    ],
+    "extract_target": "entity:window",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_009",
+    "domain": "建築",
+    "symbol_group": "階段上り下り",
+    "canonical_name": "stair_direction",
+    "visual_feature_keywords_json": [
+      "UP/DNや矢印付き階段"
+    ],
+    "typical_context_json": [
+      "平面図"
+    ],
+    "extract_target": "entity:stair",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_010",
+    "domain": "建築",
+    "symbol_group": "点検口",
+    "canonical_name": "access_panel",
+    "visual_feature_keywords_json": [
+      "矩形/ハッチと略号"
+    ],
+    "typical_context_json": [
+      "天井伏図"
+    ],
+    "extract_target": "entity:access_panel",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_011",
+    "domain": "建築",
+    "symbol_group": "室名・室番号タグ",
+    "canonical_name": "room_tag",
+    "visual_feature_keywords_json": [
+      "室内中央付近の文字列"
+    ],
+    "typical_context_json": [
+      "平面図"
+    ],
+    "extract_target": "entity:room",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_012",
+    "domain": "建築",
+    "symbol_group": "仕上記号",
+    "canonical_name": "finish_tag",
+    "visual_feature_keywords_json": [
+      "床/壁/天井仕上コード"
+    ],
+    "typical_context_json": [
+      "平面図",
+      "展開図",
+      "仕上表"
+    ],
+    "extract_target": "attribute:finish",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_013",
+    "domain": "構造",
+    "symbol_group": "鉄筋注記",
+    "canonical_name": "rebar_note",
+    "visual_feature_keywords_json": [
+      "Dxx@yy/本数/かぶり等"
+    ],
+    "typical_context_json": [
+      "配筋図"
+    ],
+    "extract_target": "entity:rebar",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_014",
+    "domain": "構造",
+    "symbol_group": "柱符号",
+    "canonical_name": "column_tag",
+    "visual_feature_keywords_json": [
+      "C1等の柱符号"
+    ],
+    "typical_context_json": [
+      "床伏図",
+      "柱表"
+    ],
+    "extract_target": "entity:column",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_015",
+    "domain": "構造",
+    "symbol_group": "梁符号",
+    "canonical_name": "beam_tag",
+    "visual_feature_keywords_json": [
+      "G1/B1等の梁符号"
+    ],
+    "typical_context_json": [
+      "床伏図",
+      "梁表"
+    ],
+    "extract_target": "entity:beam",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_016",
+    "domain": "構造",
+    "symbol_group": "スラブ符号",
+    "canonical_name": "slab_tag",
+    "visual_feature_keywords_json": [
+      "S1等のスラブ符号"
+    ],
+    "typical_context_json": [
+      "床伏図"
+    ],
+    "extract_target": "entity:slab",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_017",
+    "domain": "構造",
+    "symbol_group": "鉄骨部材符号",
+    "canonical_name": "steel_member_tag",
+    "visual_feature_keywords_json": [
+      "H-xx, PL-xx等"
+    ],
+    "typical_context_json": [
+      "鉄骨一般図",
+      "鉄骨詳細図"
+    ],
+    "extract_target": "entity:steel_member",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_018",
+    "domain": "構造",
+    "symbol_group": "溶接記号",
+    "canonical_name": "weld_symbol",
+    "visual_feature_keywords_json": [
+      "溶接記号と脚長等注記"
+    ],
+    "typical_context_json": [
+      "鉄骨詳細図"
+    ],
+    "extract_target": "attribute:weld",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_019",
+    "domain": "電気",
+    "symbol_group": "照明器具記号",
+    "canonical_name": "lighting_symbol",
+    "visual_feature_keywords_json": [
+      "器具形状+器具番号の組合せ"
+    ],
+    "typical_context_json": [
+      "電灯平面図",
+      "器具表"
+    ],
+    "extract_target": "entity:light_fixture",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_020",
+    "domain": "電気",
+    "symbol_group": "スイッチ記号",
+    "canonical_name": "switch_symbol",
+    "visual_feature_keywords_json": [
+      "S/3路/位置と結線線"
+    ],
+    "typical_context_json": [
+      "電灯平面図"
+    ],
+    "extract_target": "entity:switch",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_021",
+    "domain": "電気",
+    "symbol_group": "コンセント記号",
+    "canonical_name": "outlet_symbol",
+    "visual_feature_keywords_json": [
+      "2P/接地等の記号"
+    ],
+    "typical_context_json": [
+      "動力/コンセント図"
+    ],
+    "extract_target": "entity:outlet",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_022",
+    "domain": "電気",
+    "symbol_group": "分電盤・盤記号",
+    "canonical_name": "panel_symbol",
+    "visual_feature_keywords_json": [
+      "盤略号と盤名称"
+    ],
+    "typical_context_json": [
+      "単線図",
+      "平面図"
+    ],
+    "extract_target": "entity:panel",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_023",
+    "domain": "電気",
+    "symbol_group": "感知器記号",
+    "canonical_name": "detector_symbol",
+    "visual_feature_keywords_json": [
+      "丸記号+感知種別"
+    ],
+    "typical_context_json": [
+      "火報図"
+    ],
+    "extract_target": "entity:fire_detector",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_024",
+    "domain": "電気",
+    "symbol_group": "通信端子記号",
+    "canonical_name": "low_voltage_outlet",
+    "visual_feature_keywords_json": [
+      "LAN/TEL/TV等の端子記号"
+    ],
+    "typical_context_json": [
+      "通信情報設備図"
+    ],
+    "extract_target": "entity:low_voltage_outlet",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_025",
+    "domain": "電気",
+    "symbol_group": "外灯記号",
+    "canonical_name": "pole_light",
+    "visual_feature_keywords_json": [
+      "ポール+器具注記"
+    ],
+    "typical_context_json": [
+      "構内配電図"
+    ],
+    "extract_target": "entity:site_light",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_026",
+    "domain": "機械",
+    "symbol_group": "室内機記号",
+    "canonical_name": "indoor_unit",
+    "visual_feature_keywords_json": [
+      "FCU/AHU等の記号"
+    ],
+    "typical_context_json": [
+      "空調平面図",
+      "機器表"
+    ],
+    "extract_target": "entity:hvac_equipment",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_027",
+    "domain": "機械",
+    "symbol_group": "ダクトサイズ注記",
+    "canonical_name": "duct_size_note",
+    "visual_feature_keywords_json": [
+      "WxH、φ、風量の組合せ"
+    ],
+    "typical_context_json": [
+      "空調図",
+      "換気図"
+    ],
+    "extract_target": "entity:duct",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_028",
+    "domain": "機械",
+    "symbol_group": "ダンパー記号",
+    "canonical_name": "damper_symbol",
+    "visual_feature_keywords_json": [
+      "FD/MD等の注記付き記号"
+    ],
+    "typical_context_json": [
+      "ダクト図"
+    ],
+    "extract_target": "entity:damper",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_029",
+    "domain": "機械",
+    "symbol_group": "衛生器具記号",
+    "canonical_name": "sanitary_fixture_symbol",
+    "visual_feature_keywords_json": [
+      "便器・洗面器等の機器形状"
+    ],
+    "typical_context_json": [
+      "衛生器具図"
+    ],
+    "extract_target": "entity:sanitary_fixture",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_030",
+    "domain": "機械",
+    "symbol_group": "配管口径注記",
+    "canonical_name": "pipe_size_note",
+    "visual_feature_keywords_json": [
+      "50A, 65A, 100A等"
+    ],
+    "typical_context_json": [
+      "配管平面図",
+      "系統図"
+    ],
+    "extract_target": "entity:pipe_segment",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_031",
+    "domain": "機械",
+    "symbol_group": "バルブ記号",
+    "canonical_name": "valve_symbol",
+    "visual_feature_keywords_json": [
+      "GV/CV/BFV等の記号"
+    ],
+    "typical_context_json": [
+      "配管図"
+    ],
+    "extract_target": "entity:valve",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_032",
+    "domain": "機械",
+    "symbol_group": "桝・排水記号",
+    "canonical_name": "drainage_structure_symbol",
+    "visual_feature_keywords_json": [
+      "桝、排水口、掃除口記号"
+    ],
+    "typical_context_json": [
+      "排水設備図",
+      "屋外排水図"
+    ],
+    "extract_target": "entity:drainage_structure",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_033",
+    "domain": "土木",
+    "symbol_group": "測点記号",
+    "canonical_name": "station_marker",
+    "visual_feature_keywords_json": [
+      "No.xx等"
+    ],
+    "typical_context_json": [
+      "道路平面図",
+      "縦断面図"
+    ],
+    "extract_target": "meta:station",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_034",
+    "domain": "土木",
+    "symbol_group": "現況/計画高表記",
+    "canonical_name": "ground_level_note",
+    "visual_feature_keywords_json": [
+      "GH/FH/DL等"
+    ],
+    "typical_context_json": [
+      "縦断面図",
+      "横断面図"
+    ],
+    "extract_target": "measurement:elevation",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_035",
+    "domain": "土木",
+    "symbol_group": "側溝記号",
+    "canonical_name": "gutter_symbol",
+    "visual_feature_keywords_json": [
+      "側溝断面/規格注記"
+    ],
+    "typical_context_json": [
+      "排水施設図"
+    ],
+    "extract_target": "entity:gutter",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_036",
+    "domain": "土木",
+    "symbol_group": "縁石記号",
+    "canonical_name": "curb_symbol",
+    "visual_feature_keywords_json": [
+      "縁石種別と延長注記"
+    ],
+    "typical_context_json": [
+      "外構詳細図",
+      "道路平面図"
+    ],
+    "extract_target": "entity:curb",
+    "legend_priority_required": "true"
+  },
+  {
+    "symbol_id": "SYM_037",
+    "domain": "土木",
+    "symbol_group": "舗装層注記",
+    "canonical_name": "pavement_layer_note",
+    "visual_feature_keywords_json": [
+      "表層/基層/路盤の層厚"
+    ],
+    "typical_context_json": [
+      "舗装構成図"
+    ],
+    "extract_target": "entity:pavement_layer",
+    "legend_priority_required": "false"
+  },
+  {
+    "symbol_id": "SYM_038",
+    "domain": "土木",
+    "symbol_group": "法面・勾配注記",
+    "canonical_name": "slope_note",
+    "visual_feature_keywords_json": [
+      "1:n勾配や法肩法尻"
+    ],
+    "typical_context_json": [
+      "造成図",
+      "横断面図"
+    ],
+    "extract_target": "entity:slope",
+    "legend_priority_required": "false"
+  }
+]

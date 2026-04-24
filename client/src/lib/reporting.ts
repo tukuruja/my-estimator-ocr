@@ -1,7 +1,9 @@
-import type {
+import {
   CalculationResult,
+  ChangeEstimateRow,
   Drawing,
   EstimateBlock,
+  EstimateOutputMode,
   EstimateReportRow,
   GeneratedReportBundle,
   Project,
@@ -14,9 +16,33 @@ interface ReportContext {
   block: EstimateBlock;
   drawing: Drawing | null;
   result: CalculationResult;
+  /** 見積出力モード（3択） */
+  outputMode?: EstimateOutputMode;
+}
+
+/** モード別の確信度閾値 */
+const MODE_CONFIDENCE_THRESHOLD: Record<EstimateOutputMode, number> = {
+  confirmed: 0.8,
+  pending: 0.5,
+  full: 0.0,
+};
+
+/** 確信度に基づくフラグ判定 */
+function classifyByConfidence(confidence: number): { isPending: boolean; requiresReview: boolean } {
+  return {
+    isPending: confidence >= 0.5 && confidence < 0.8,
+    requiresReview: confidence < 0.5,
+  };
 }
 
 function createEstimateRow(input: Omit<EstimateReportRow, 'id'>): EstimateReportRow {
+  return {
+    id: crypto.randomUUID(),
+    ...input,
+  };
+}
+
+function createChangeEstimateRow(input: Omit<ChangeEstimateRow, 'id'>): ChangeEstimateRow {
   return {
     id: crypto.randomUUID(),
     ...input,
@@ -40,6 +66,85 @@ function createReviewIssue(input: Omit<ReviewIssue, 'id'>): ReviewIssue {
 function resolveSourceSummary(drawing: Drawing | null): string {
   if (!drawing) return '図面未連携';
   return `${drawing.fileName || drawing.name} / OCR確認済み`;
+}
+
+function formatPageRefs(pageRefs: number[]): string {
+  if (pageRefs.length === 0) return '未設定';
+  return pageRefs.map((pageNo) => `p.${pageNo}`).join(', ');
+}
+
+function formatTradeNames(tradeNames: string[]): string {
+  return tradeNames.length > 0 ? tradeNames.join(', ') : '未設定';
+}
+
+function formatPhotoSummary(photoUrls: string[]): string {
+  if (photoUrls.length === 0) return '未登録';
+  return `${photoUrls.length}枚`;
+}
+
+function buildZoneCoverageIssues(block: EstimateBlock, result: CalculationResult): ReviewIssue[] {
+  const zones = Array.isArray(block.zones) ? block.zones.filter((zone) => zone.name.trim()) : [];
+  if (zones.length === 0) return [];
+
+  const totalZoneQuantity = zones.reduce((sum, zone) => sum + Math.max(0, Number(zone.primaryQuantity || 0)), 0);
+  if (result.primaryQuantity <= 0 || totalZoneQuantity <= 0) {
+    return [
+      createReviewIssue({
+        severity: 'warning',
+        title: '区画別数量未設定',
+        detail: '区画名はありますが、区画別主数量が未入力です。変更見積に使う数量を入れてください。',
+        fieldName: 'zones',
+      }),
+    ];
+  }
+
+  const ratio = totalZoneQuantity / result.primaryQuantity;
+  if (Math.abs(1 - ratio) <= 0.05) return [];
+
+  return [
+    createReviewIssue({
+      severity: 'warning',
+      title: '区画別数量と総数量が不一致',
+      detail: `区画数量合計 ${totalZoneQuantity.toFixed(2)}${result.primaryUnit} が、総数量 ${result.primaryQuantity.toFixed(2)}${result.primaryUnit} と一致していません。`,
+      fieldName: 'zones',
+    }),
+  ];
+}
+
+function buildZoneMetadataIssues(block: EstimateBlock): ReviewIssue[] {
+  const zones = Array.isArray(block.zones) ? block.zones.filter((zone) => zone.name.trim()) : [];
+  const issues: ReviewIssue[] = [];
+
+  for (const zone of zones) {
+    if (zone.primaryQuantity > 0 && zone.drawingPageRefs.length === 0) {
+      issues.push(createReviewIssue({
+        severity: 'warning',
+        title: `区画「${zone.name}」の図面根拠未設定`,
+        detail: '変更見積に使う図面ページが未設定です。区画ごとの根拠ページを入れてください。',
+        fieldName: 'zones',
+      }));
+    }
+
+    if (zone.coordinationAdjustmentRate > 0 && zone.relatedTradeNames.length === 0) {
+      issues.push(createReviewIssue({
+        severity: 'warning',
+        title: `区画「${zone.name}」の干渉工種未設定`,
+        detail: '他工種調整率を計上していますが、対象工種名が未設定です。設備・植栽・建築外構などの相手工種を入れてください。',
+        fieldName: 'zones',
+      }));
+    }
+
+    if ((zone.temporaryRestorationRate > 0 || zone.note.trim()) && zone.notePhotoUrls.length === 0) {
+      issues.push(createReviewIssue({
+        severity: 'info',
+        title: `区画「${zone.name}」の備考写真未設定`,
+        detail: '仮復旧や施工干渉の説明はありますが、備考写真が未設定です。変更見積の根拠写真があれば紐づけてください。',
+        fieldName: 'zones',
+      }));
+    }
+  }
+
+  return issues;
 }
 
 function buildRequiredFieldIssues(block: EstimateBlock): ReviewIssue[] {
@@ -87,6 +192,38 @@ function buildRequiredFieldIssues(block: EstimateBlock): ReviewIssue[] {
         issues.push(createReviewIssue({ severity: 'critical', title: '撤去数量未設定', detail: '延長・幅・厚のいずれかが不足しています。', fieldName: 'demolitionWidth' }));
       }
       break;
+    case 'count_structure':
+      if (!block.secondaryProduct) {
+        issues.push(createReviewIssue({ severity: 'critical', title: '数量対象名未設定', detail: '街渠桝・接続桝などの名称が未設定です。', fieldName: 'secondaryProduct' }));
+      }
+      if (block.countQuantity <= 0) {
+        issues.push(createReviewIssue({ severity: 'critical', title: 'count 数量未設定', detail: '箇所・基・本などの主数量が未設定です。', fieldName: 'countQuantity' }));
+      }
+      if (!block.countUnit.trim()) {
+        issues.push(createReviewIssue({ severity: 'warning', title: 'count 単位未設定', detail: '箇所・基・本などの数量単位が空です。', fieldName: 'countUnit' }));
+      }
+      break;
+    case 'material_takeoff':
+      if (!block.secondaryProduct) {
+        issues.push(createReviewIssue({ severity: 'critical', title: '材料名未設定', detail: '材料層または地盤改良名が未設定です。', fieldName: 'secondaryProduct' }));
+      }
+      if (block.materialDirectQuantity <= 0 && (block.materialArea <= 0 || block.materialThickness <= 0)) {
+        issues.push(createReviewIssue({
+          severity: 'critical',
+          title: '材料数量 root 未設定',
+          detail: '直接数量、または 面積×厚み のどちらかが必要です。',
+          fieldName: 'materialDirectQuantity',
+        }));
+      }
+      if (block.materialTakeoffMode === 't' && block.materialDirectQuantity <= 0 && block.materialDensity <= 0) {
+        issues.push(createReviewIssue({
+          severity: 'critical',
+          title: 't 監査の換算密度未設定',
+          detail: 't 監査で直接数量が無い場合は、t/m3 の換算密度が必要です。',
+          fieldName: 'materialDensity',
+        }));
+      }
+      break;
     default:
       break;
   }
@@ -94,10 +231,19 @@ function buildRequiredFieldIssues(block: EstimateBlock): ReviewIssue[] {
   return issues;
 }
 
-export function generateReportBundle({ project, block, drawing, result }: ReportContext): GeneratedReportBundle {
+export function generateReportBundle({ project, block, drawing, result, outputMode = 'confirmed' }: ReportContext): GeneratedReportBundle {
   const sourceSummary = resolveSourceSummary(drawing);
 
-  const estimateRows = result.lineItems.map((lineItem) => createEstimateRow({
+  // 図面候補の平均確信度を算出
+  const avgConfidence = drawing && drawing.aiCandidates.length > 0
+    ? drawing.aiCandidates.reduce((sum, c) => sum + c.confidence, 0) / drawing.aiCandidates.length
+    : 0.85; // 図面なしの場合は手入力とみなして高信頼度
+
+  const threshold = MODE_CONFIDENCE_THRESHOLD[outputMode];
+  const flags = classifyByConfidence(avgConfidence);
+
+  // 全行を生成（確信度・フラグ付き）
+  const allEstimateRows = result.lineItems.map((lineItem) => createEstimateRow({
     section: lineItem.section,
     itemName: lineItem.itemName,
     specification: lineItem.specification,
@@ -107,9 +253,59 @@ export function generateReportBundle({ project, block, drawing, result }: Report
     amount: lineItem.amount,
     remarks: lineItem.remarks,
     sourceSummary,
+    confidenceLevel: avgConfidence,
+    isPending: flags.isPending,
+    requiresReview: flags.requiresReview,
   }));
 
-  const estimateRowByKey = new Map(result.lineItems.map((lineItem, index) => [lineItem.key, estimateRows[index]]));
+  // モード別フィルタリング
+  const estimateRows = outputMode === 'full'
+    ? allEstimateRows
+    : allEstimateRows.filter((row) => (row.confidenceLevel ?? 1) >= threshold);
+
+  // モード別サマリ算出
+  const confirmedRows = allEstimateRows.filter((row) => (row.confidenceLevel ?? 1) >= 0.8);
+  const pendingRows = allEstimateRows.filter((row) => {
+    const c = row.confidenceLevel ?? 1;
+    return c >= 0.5 && c < 0.8;
+  });
+  const modeSummary = {
+    confirmedCount: confirmedRows.length,
+    pendingCount: pendingRows.length,
+    fullCount: allEstimateRows.length,
+    confirmedAmount: confirmedRows.reduce((sum, r) => sum + r.amount, 0),
+    pendingAmount: pendingRows.reduce((sum, r) => sum + r.amount, 0),
+    fullAmount: allEstimateRows.reduce((sum, r) => sum + r.amount, 0),
+  };
+
+  const estimateRowByKey = new Map(result.lineItems.map((lineItem, index) => [lineItem.key, allEstimateRows[index]]));
+  const changeEstimateRows = result.zoneBreakdowns.map((zone) => createChangeEstimateRow({
+    zoneName: zone.name,
+    itemName: result.displayName,
+    specification: `${result.displayName} / ${zone.primaryQuantity}${zone.primaryUnit} / 配賦${zone.quantityShare}%`,
+    quantity: zone.primaryQuantity,
+    unit: zone.primaryUnit,
+    quantityShare: zone.quantityShare,
+    baseAmount: zone.baseAmount,
+    remobilizationCount: zone.remobilizationCount,
+    remobilizationAmount: zone.remobilizationAmount,
+    temporaryRestorationRate: zone.temporaryRestorationRate,
+    temporaryRestorationQuantity: zone.temporaryRestorationQuantity,
+    temporaryRestorationAmount: zone.temporaryRestorationAmount,
+    coordinationAdjustmentRate: zone.coordinationAdjustmentRate,
+    coordinationAdjustmentAmount: zone.coordinationAdjustmentAmount,
+    totalAmount: zone.totalAmount,
+    drawingPageRefs: zone.drawingPageRefs,
+    notePhotoUrls: zone.notePhotoUrls,
+    relatedTradeNames: zone.relatedTradeNames,
+    remarks: [
+      `図面 ${formatPageRefs(zone.drawingPageRefs)}`,
+      `他工種 ${formatTradeNames(zone.relatedTradeNames)}`,
+      `備考写真 ${formatPhotoSummary(zone.notePhotoUrls)}`,
+      zone.note || null,
+    ].filter(Boolean).join(' / '),
+    sourceSummary,
+  }));
 
   const evidenceRows = result.priceEvidence.map((evidence) => {
     const estimateRow = estimateRowByKey.get(evidence.lineItemKey);
@@ -137,6 +333,8 @@ export function generateReportBundle({ project, block, drawing, result }: Report
   }
 
   reviewIssues.push(...buildRequiredFieldIssues(block));
+  reviewIssues.push(...buildZoneCoverageIssues(block, result));
+  reviewIssues.push(...buildZoneMetadataIssues(block));
 
   for (const fieldName of block.requiresReviewFields) {
     reviewIssues.push(createReviewIssue({
@@ -166,11 +364,16 @@ export function generateReportBundle({ project, block, drawing, result }: Report
 
   return {
     estimateRows,
+    changeEstimateRows,
     unitPriceEvidenceRows: evidenceRows,
     reviewIssues,
+    outputMode,
+    modeSummary,
     summary: {
-      totalAmount: Math.round(result.totalAmount),
+      totalAmount: Math.round(estimateRows.reduce((sum, r) => sum + r.amount, 0)),
       totalRows: estimateRows.length,
+      changeEstimateRowCount: changeEstimateRows.length,
+      changeEstimateTotalAmount: changeEstimateRows.reduce((sum, row) => sum + row.totalAmount, 0),
       requiresReviewCount: reviewIssues.length,
     },
   };

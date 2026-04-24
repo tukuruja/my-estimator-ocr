@@ -79,7 +79,7 @@ export default function CalculationResults({ result, block }: CalculationResults
         </div>
 
         <div className="mb-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-          下の表では、工種ごとの主要数量と金額内訳を確認できます。帳票の明細はこの試算結果をもとにサーバ側で生成します。
+          下の表では、工種ごとの主要数量と金額内訳を確認できます。集合住宅外構で分割施工する場合は「分割施工数量」に区画数・仮復旧・他工種調整が別立てで出ます。変更見積書は区画ごとの図面ページ・備考写真・他工種名を含めてサーバ側で別帳票生成します。
         </div>
 
         <div className="grid gap-2 xl:grid-cols-2">
@@ -87,6 +87,47 @@ export default function CalculationResults({ result, block }: CalculationResults
             <ResultSection key={section.id} title={section.title} tone={section.tone} rows={section.metrics} />
           ))}
         </div>
+
+        {result.zoneBreakdowns.length > 0 && (
+          <div className="mt-3 overflow-hidden rounded border border-cyan-200 shadow-sm">
+            <div className="bg-cyan-600 px-2 py-1 text-xs font-bold text-white">区画別変更見積内訳</div>
+            <div className="bg-white">
+              <table className="w-full text-xs">
+                <thead className="bg-cyan-50 text-slate-600">
+                  <tr className="border-b border-cyan-100">
+                    <th className="px-2 py-2 text-left">区画名</th>
+                    <th className="px-2 py-2 text-right">数量</th>
+                    <th className="px-2 py-2 text-right">配賦率</th>
+                    <th className="px-2 py-2 text-right">再段取り</th>
+                    <th className="px-2 py-2 text-left">根拠図面 / 干渉工種 / 写真</th>
+                    <th className="px-2 py-2 text-right">追加額</th>
+                    <th className="px-2 py-2 text-right">区画金額</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.zoneBreakdowns.map((zone) => (
+                    <tr key={zone.id} className="border-b border-slate-100 align-top last:border-b-0">
+                      <td className="px-2 py-2">
+                        <div className="font-semibold text-slate-900">{zone.name}</div>
+                        {zone.note && <div className="mt-1 text-[11px] text-slate-500">{zone.note}</div>}
+                      </td>
+                      <td className="px-2 py-2 text-right">{formatNumber(zone.primaryQuantity)}{zone.primaryUnit}</td>
+                      <td className="px-2 py-2 text-right">{formatNumber(zone.quantityShare)}%</td>
+                      <td className="px-2 py-2 text-right">{zone.remobilizationCount}回</td>
+                      <td className="px-2 py-2">
+                        <div>図面: {zone.drawingPageRefs.length > 0 ? zone.drawingPageRefs.map((pageNo) => `p.${pageNo}`).join(', ') : '未設定'}</div>
+                        <div className="mt-1">他工種: {zone.relatedTradeNames.length > 0 ? zone.relatedTradeNames.join(', ') : '未設定'}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">写真: {zone.notePhotoUrls.length > 0 ? `${zone.notePhotoUrls.length}枚` : '未登録'}</div>
+                      </td>
+                      <td className="px-2 py-2 text-right">{formatCurrency(zone.remobilizationAmount + zone.temporaryRestorationAmount + zone.coordinationAdjustmentAmount)}</td>
+                      <td className="px-2 py-2 text-right font-semibold">{formatCurrency(zone.totalAmount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,3 +1,24 @@
+// ====================================================
+// 地盤条件・ほぐし係数（SiteConditionFactors）
+// 根拠: 国土交通省 土木工事積算基準 土量換算係数L値
+// ====================================================
+export const groundConditions = [
+  { name: '砂質土（標準）',     looseningFactor: 1.25, description: '一般的な砂質土・砂礫土' },
+  { name: '粘性土（軟弱）',     looseningFactor: 1.30, description: '粘性土・シルト質土' },
+  { name: '礫質土',             looseningFactor: 1.20, description: '礫が多い土質' },
+  { name: '岩盤（軟岩）',       looseningFactor: 1.40, description: '軟質岩・風化岩' },
+  { name: '岩盤（硬岩）',       looseningFactor: 1.60, description: '硬質岩・花崗岩等' },
+  { name: '改良土',             looseningFactor: 1.15, description: 'セメント改良・石灰改良後' },
+  { name: '建設発生土（再利用）',looseningFactor: 1.10, description: '既に一度掘削された土' },
+] as const;
+
+export type GroundConditionName = (typeof groundConditions)[number]['name'];
+
+export function getLooseningFactor(groundConditionName: string): number {
+  const found = groundConditions.find((g) => g.name === groundConditionName);
+  return found?.looseningFactor ?? 1.25; // デフォルト: 砂質土標準
+}
+
 // 二次製品マスターデータ
 export const secondaryProducts = [
   { name: '1号ｺﾈｸﾄﾎｰﾙ R№2 H3060', price: 189490 },
@@ -261,3 +282,4 @@ export function getPouringWorkers(concreteVolume: number): number {
   if (concreteVolume <= 20) return 14;
   return 16;
 }
+

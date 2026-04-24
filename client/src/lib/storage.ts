@@ -1,5 +1,7 @@
-import type { AppState, EstimateBlock, Project } from './types';
-import { createDefaultBlock, createDefaultProject, createInitialAppState } from './types';
+import type { AppState, Drawing, EstimateBlock, EstimateZone, Project } from './types';
+import { createDefaultBlock, createDefaultDrawing, createDefaultEstimateZone, createDefaultProject, createInitialAppState } from './types';
+import { resolveAppApiUrl } from './api';
+import { getWorkspaceHeaders, getWorkspaceId } from './workspace';
 
 const LEGACY_STORAGE_KEY = 'my-estimator-data';
 const UI_STORAGE_KEY = 'my-estimator-ui-meta';
@@ -16,12 +18,107 @@ interface ServerStateResponse {
   data?: {
     projects?: Project[];
     updatedAt?: string | null;
+    workspaceId?: string | null;
   };
   projects?: Project[];
 }
 
+function workspaceStorageKey(baseKey: string): string {
+  return `${baseKey}:${getWorkspaceId()}`;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeNumberList(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === 'number') return item;
+      if (typeof item === 'string' && item.trim()) {
+        const next = Number(item);
+        return Number.isFinite(next) ? next : null;
+      }
+      return null;
+    })
+    .filter((item): item is number => item !== null)
+    .map((item) => Math.max(1, Math.round(item)));
+}
+
+function normalizeZone(raw: unknown, index: number): EstimateZone {
+  const fallback = createDefaultEstimateZone(`区画 ${index + 1}`);
+  if (!isObject(raw)) {
+    return fallback;
+  }
+
+  return {
+    ...fallback,
+    ...raw,
+    id: typeof raw.id === 'string' ? raw.id : fallback.id,
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : fallback.name,
+    primaryQuantity: typeof raw.primaryQuantity === 'number' ? raw.primaryQuantity : fallback.primaryQuantity,
+    drawingPageRefs: normalizeNumberList(raw.drawingPageRefs),
+    notePhotoUrls: normalizeStringList(raw.notePhotoUrls),
+    relatedTradeNames: normalizeStringList(raw.relatedTradeNames),
+    remobilizationCount: typeof raw.remobilizationCount === 'number' ? raw.remobilizationCount : fallback.remobilizationCount,
+    temporaryRestorationRate: typeof raw.temporaryRestorationRate === 'number' ? raw.temporaryRestorationRate : fallback.temporaryRestorationRate,
+    coordinationAdjustmentRate: typeof raw.coordinationAdjustmentRate === 'number' ? raw.coordinationAdjustmentRate : fallback.coordinationAdjustmentRate,
+    note: typeof raw.note === 'string' ? raw.note : fallback.note,
+  };
+}
+
+function normalizeBlock(projectId: string, raw: unknown, index: number): EstimateBlock {
+  const source = isObject(raw) ? raw as Partial<EstimateBlock> : {};
+  const fallback = createDefaultBlock(projectId, source.name || `見積 ${index + 1}`);
+  return {
+    ...fallback,
+    ...source,
+    id: typeof source.id === 'string' ? source.id : fallback.id,
+    projectId,
+    drawingId: typeof source.drawingId === 'string' ? source.drawingId : source.drawingId === null ? null : fallback.drawingId,
+    requiresReviewFields: Array.isArray(source.requiresReviewFields) ? source.requiresReviewFields : [],
+    appliedCandidateIds: Array.isArray(source.appliedCandidateIds) ? source.appliedCandidateIds : [],
+    zones: Array.isArray(source.zones) ? source.zones.map((zone, zoneIndex) => normalizeZone(zone, zoneIndex)) : [],
+  };
+}
+
+function normalizeDrawing(projectId: string, raw: unknown, index: number): Drawing {
+  const source = isObject(raw) ? raw as Partial<Drawing> : {};
+  const fallback = createDefaultDrawing(projectId, source.name || `図面 ${index + 1}`);
+  return {
+    ...fallback,
+    ...source,
+    id: typeof source.id === 'string' ? source.id : fallback.id,
+    projectId,
+    pages: Array.isArray(source.pages) ? source.pages : [],
+    ocrItems: Array.isArray(source.ocrItems) ? source.ocrItems : [],
+    aiCandidates: Array.isArray(source.aiCandidates) ? source.aiCandidates : [],
+    workTypeCandidates: Array.isArray(source.workTypeCandidates) ? source.workTypeCandidates : [],
+    reviewQueue: Array.isArray(source.reviewQueue) ? source.reviewQueue : [],
+    manualResolutions: Array.isArray(source.manualResolutions) ? source.manualResolutions : [],
+    manualMeasurements: Array.isArray(source.manualMeasurements) ? source.manualMeasurements : [],
+    measurementCalibrations: Array.isArray(source.measurementCalibrations) ? source.measurementCalibrations : [],
+  };
+}
+
+function normalizeProject(project: Project): Project {
+  return {
+    ...project,
+    drawings: Array.isArray(project.drawings)
+      ? project.drawings.map((drawing, index) => normalizeDrawing(project.id, drawing, index))
+      : [],
+    blocks: Array.isArray(project.blocks)
+      ? project.blocks.map((block, index) => normalizeBlock(project.id, block, index))
+      : [createDefaultBlock(project.id, `${project.name} 見積 1`)],
+  };
 }
 
 function migrateLegacyData(raw: Record<string, unknown>): AppState {
@@ -38,6 +135,7 @@ function migrateLegacyData(raw: Record<string, unknown>): AppState {
         blockType: 'secondary_product',
         requiresReviewFields: Array.isArray(block.requiresReviewFields) ? block.requiresReviewFields : [],
         appliedCandidateIds: Array.isArray(block.appliedCandidateIds) ? block.appliedCandidateIds : [],
+        zones: Array.isArray(block.zones) ? block.zones.map((zone, zoneIndex) => normalizeZone(zone, zoneIndex)) : [],
       }))
     : [createDefaultBlock(project.id, '新規見積')];
 
@@ -63,7 +161,9 @@ function normalizeState(raw: unknown): AppState {
     return migrateLegacyData(raw);
   }
 
-  const projects = raw.projects.length > 0 ? (raw.projects as Project[]) : createInitialAppState().projects;
+  const projects = raw.projects.length > 0
+    ? (raw.projects as Project[]).map((project) => normalizeProject(project))
+    : createInitialAppState().projects;
   const activeProjectId = typeof raw.activeProjectId === 'string' ? raw.activeProjectId : projects[0]?.id;
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
   const activeBlockId = typeof raw.activeBlockId === 'string'
@@ -81,10 +181,18 @@ function normalizeState(raw: unknown): AppState {
 }
 
 function loadLegacyLocalState(): AppState | null {
+  const scopedKey = workspaceStorageKey(LEGACY_STORAGE_KEY);
   try {
-    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return null;
-    return normalizeState(JSON.parse(raw));
+    const scopedRaw = localStorage.getItem(scopedKey);
+    if (scopedRaw) {
+      return normalizeState(JSON.parse(scopedRaw));
+    }
+
+    const globalRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!globalRaw) return null;
+    const migrated = normalizeState(JSON.parse(globalRaw));
+    localStorage.setItem(scopedKey, JSON.stringify(migrated));
+    return migrated;
   } catch (error) {
     console.error('Failed to load local fallback data:', error);
     return null;
@@ -110,8 +218,9 @@ function normalizeUiMeta(raw: unknown, fallback: AppState): UiStateMeta {
 }
 
 function loadUiMeta(fallback: AppState): UiStateMeta {
+  const scopedKey = workspaceStorageKey(UI_STORAGE_KEY);
   try {
-    const raw = localStorage.getItem(UI_STORAGE_KEY);
+    const raw = localStorage.getItem(scopedKey);
     if (!raw) {
       return normalizeUiMeta(null, fallback);
     }
@@ -147,6 +256,7 @@ function mergeProjectsWithUi(projects: Project[], uiMeta: UiStateMeta): AppState
 }
 
 function saveUiMeta(data: AppState): void {
+  const scopedKey = workspaceStorageKey(UI_STORAGE_KEY);
   try {
     const payload: UiStateMeta = {
       activeProjectId: data.activeProjectId,
@@ -154,7 +264,7 @@ function saveUiMeta(data: AppState): void {
       activeBlockId: data.activeBlockId,
       autoSave: data.autoSave,
     };
-    localStorage.setItem(UI_STORAGE_KEY, JSON.stringify(payload));
+    localStorage.setItem(scopedKey, JSON.stringify(payload));
   } catch (error) {
     console.error('Failed to save UI state meta:', error);
   }
@@ -162,7 +272,9 @@ function saveUiMeta(data: AppState): void {
 
 async function loadServerProjects(): Promise<Project[] | null> {
   try {
-    const response = await fetch('/api/app-state');
+    const response = await fetch(resolveAppApiUrl('/api/app-state'), {
+      headers: getWorkspaceHeaders(),
+    });
     if (!response.ok) {
       return null;
     }
@@ -181,10 +293,11 @@ async function loadServerProjects(): Promise<Project[] | null> {
 }
 
 async function saveServerProjects(projects: Project[]): Promise<void> {
-  const response = await fetch('/api/app-state', {
+  const response = await fetch(resolveAppApiUrl('/api/app-state'), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
+      ...getWorkspaceHeaders(),
     },
     body: JSON.stringify({ projects }),
   });
@@ -201,7 +314,7 @@ export async function loadData(): Promise<AppState> {
 
   if (serverProjects && serverProjects.length > 0) {
     const merged = mergeProjectsWithUi(serverProjects, uiMeta);
-    localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(merged));
+    localStorage.setItem(workspaceStorageKey(LEGACY_STORAGE_KEY), JSON.stringify(merged));
     return merged;
   }
 
@@ -222,7 +335,7 @@ export async function saveData(data: AppState): Promise<void> {
   }
 
   try {
-    localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(workspaceStorageKey(LEGACY_STORAGE_KEY), JSON.stringify(data));
   } catch (error) {
     console.error('Failed to save local fallback data:', error);
   }

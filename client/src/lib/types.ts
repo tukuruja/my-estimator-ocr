@@ -1,10 +1,26 @@
 export type BoundingBox = [number, number, number, number, number, number, number, number];
 
-export type BlockType = 'secondary_product' | 'retaining_wall' | 'pavement' | 'demolition';
+export type BlockType =
+  | 'secondary_product'
+  | 'retaining_wall'
+  | 'exterior_work'
+  | 'formwork'
+  | 'concrete_slab'
+  | 'fence'
+  | 'block_installation'
+  | 'formwork_block'
+  | 'structure_installation'
+  | 'self_funded_work'
+  | 'cut_fill'
+  | 'pavement'
+  | 'demolition'
+  | 'count_structure'
+  | 'material_takeoff';
 export type ProjectStatus = 'draft' | 'active' | 'approved' | 'archived';
 export type DrawingStatus = 'idle' | 'uploaded' | 'processing' | 'ready' | 'error';
 export type DrawingFileType = 'pdf' | 'image';
 export type CandidateValueType = 'string' | 'number';
+export type MaterialTakeoffMode = 'm3' | 't';
 export type MasterType =
   | 'secondary_product'
   | 'machine'
@@ -33,6 +49,52 @@ export interface DrawingPage {
   imageUrl: string;
   width: number;
   height: number;
+  physicalWidthMm?: number | null;
+  physicalHeightMm?: number | null;
+}
+
+export interface DrawingMeasurementPoint {
+  x: number;
+  y: number;
+}
+
+export type DrawingMeasurementMode = 'idle' | 'distance' | 'polygon';
+
+export interface DrawingDistanceMeasurement {
+  id: string;
+  measurementType: 'distance';
+  pageNo: number;
+  name: string;
+  points: [DrawingMeasurementPoint, DrawingMeasurementPoint];
+  pixelLength: number;
+  realLength?: number | null;
+  unit: 'px' | 'm';
+  createdAt: string;
+}
+
+export interface DrawingPolygonMeasurement {
+  id: string;
+  measurementType: 'polygon';
+  pageNo: number;
+  name: string;
+  points: DrawingMeasurementPoint[];
+  pixelArea: number;
+  realArea?: number | null;
+  unit: 'px2' | 'm2';
+  createdAt: string;
+}
+
+export type DrawingManualMeasurement = DrawingDistanceMeasurement | DrawingPolygonMeasurement;
+
+export interface DrawingMeasurementCalibration {
+  id: string;
+  pageNo: number;
+  measurementId: string;
+  measurementName: string;
+  actualLengthMeters: number;
+  pixelLength: number;
+  metersPerPixel: number;
+  createdAt: string;
 }
 
 export interface AICandidate {
@@ -48,6 +110,7 @@ export interface AICandidate {
   sourceBox: BoundingBox;
   reason: string;
   requiresReview: boolean;
+  candidateOrigin?: 'ocr' | 'manual_measurement' | 'cad_structured';
 }
 
 export interface WorkTypeCandidate {
@@ -58,6 +121,281 @@ export interface WorkTypeCandidate {
   reason: string;
   sourceTexts: string[];
   requiresReview: boolean;
+}
+
+export type OcrReviewQueueSeverity = 'info' | 'warning' | 'critical';
+
+export interface OcrReviewQueueItem {
+  id: string;
+  queue: string;
+  severity: OcrReviewQueueSeverity;
+  title: string;
+  detail: string;
+  sourceText?: string;
+  sourcePage?: number;
+  fieldName?: string;
+}
+
+export interface DrawingManualResolution {
+  id: string;
+  resolutionType: 'level_conflict' | 'plan_section_link';
+  resolutionKey: string;
+  title: string;
+  selectedText: string;
+  selectedPageNo: number;
+  selectedBox: BoundingBox;
+  appliedFieldName?: string;
+  appliedValue?: string | number | null;
+  note?: string;
+  resolvedAt: string;
+}
+
+export interface OcrLearningEntry {
+  id: string;
+  projectId?: string;
+  learningType: 'plan_section_link';
+  callout: string;
+  normalizedCallout: string;
+  sourceRole: string;
+  targetRole: string;
+  sourceText: string;
+  targetText: string;
+  sourcePageNo: number;
+  targetPageNo: number;
+  drawingNo?: string;
+  drawingTitle?: string;
+  adoptionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DrawingMediaRoute {
+  sourceMediaType: 'cad' | 'ifc' | 'vector_pdf' | 'raster_pdf' | 'image' | 'unknown';
+  preferredPipeline: 'direct_text' | 'vector_parse' | 'ocr_cv' | 'manual_review';
+  pageRotationDeg: 0 | 90 | 180 | 270;
+  sheetSplitRequired: boolean;
+  preprocessFlags: string[];
+  confidence: number;
+}
+
+export interface DrawingTitleBlockMeta {
+  drawingNo: string | null;
+  drawingTitle: string | null;
+  sheetScale: string | null;
+  revision: string | null;
+  projectName: string | null;
+  buildingName: string | null;
+  zoneName: string | null;
+  discipline: 'common' | 'architectural' | 'structural' | 'electrical' | 'mechanical' | 'civil' | 'unknown';
+  confidence: number;
+}
+
+export interface DrawingSheetClassification {
+  sheetTypeId: string;
+  sheetTypeName: string;
+  discipline: string;
+  classificationReasons: string[];
+  confidence: number;
+}
+
+export interface DrawingResolvedUnits {
+  lengthUnit: 'mm' | 'm' | 'unknown';
+  elevationUnit: 'mm' | 'm' | 'unknown';
+  sheetScaleRatio: number | null;
+  viewDirection: 'top_down' | 'bottom_up' | 'elevation' | 'sectional' | 'profile' | 'cross_section' | 'unknown';
+  readingOrder: 'left_to_right' | 'top_to_bottom' | 'custom';
+}
+
+export interface DrawingLegendResolution {
+  legendDictionary: Array<{
+    raw: string;
+    canonical: string;
+    domain: string;
+  }>;
+  normalizedTerms: Array<{
+    raw: string;
+    canonical: string;
+    type: 'abbr' | 'material' | 'finish' | 'symbol';
+  }>;
+  unknownTerms: string[];
+}
+
+export interface DrawingOcrStructuredCandidate {
+  pageNo: number;
+  text: string;
+  bbox: BoundingBox;
+  confidence: number;
+}
+
+export interface DrawingOcrStructured {
+  parsedTextBlocks: Array<DrawingOcrStructuredCandidate & {
+    normalizedText: string;
+  }>;
+  numericCandidates: Array<DrawingOcrStructuredCandidate & {
+    value: string;
+  }>;
+  unitCandidates: Array<DrawingOcrStructuredCandidate & {
+    unit: string;
+    matchedPattern: string;
+  }>;
+  levelCandidates: Array<DrawingOcrStructuredCandidate & {
+    token: string;
+    value: string | null;
+  }>;
+  dimensionCandidates: Array<DrawingOcrStructuredCandidate & {
+    values: string[];
+  }>;
+  tableCandidates: DrawingOcrStructuredCandidate[];
+  lowConfidenceCandidates: DrawingOcrStructuredCandidate[];
+  ambiguousCandidates: Array<DrawingOcrStructuredCandidate & {
+    watchGroup: string[];
+  }>;
+  pageRoles: Array<{
+    pageNo: number;
+    roles: Array<{
+      role: string;
+      keywords: string[];
+      confidence: number;
+    }>;
+  }>;
+  planSectionLinks: Array<{
+    id: string;
+    callout: string;
+    sourcePageNo: number;
+    sourceRole: string;
+    sourceText: string;
+    sourceBox: BoundingBox;
+    targetPageNo: number;
+    targetRole: string;
+    targetText: string;
+    targetBox: BoundingBox;
+    confidence: number;
+    reasons: string[];
+  }>;
+  learningMatches: Array<{
+    callout: string;
+    adoptionCount: number;
+    matchedLinks: number;
+  }>;
+  unresolvedItems: Array<{
+    target: string;
+    reason: string;
+    recommendedCheck: string;
+  }>;
+  skillSources: string[];
+}
+
+export interface DrawingCadStructuredPageAnalysis {
+  pageNo: number;
+  sourceMediaType: string;
+  preferredPipeline: string;
+  roles: string[];
+  callouts: string[];
+  dimensionCount: number;
+  levelCount: number;
+  physicalWidthMm?: number | null;
+  physicalHeightMm?: number | null;
+}
+
+export interface DrawingCadStructuredClassification {
+  pageNo: number;
+  discipline: string;
+  sheetTypeName: string;
+  workTypeCandidates: Array<{
+    blockType: BlockType;
+    label: string;
+    confidence: number;
+  }>;
+}
+
+export interface DrawingCadStructuredEntity {
+  id: string;
+  pageNo: number;
+  entityType: 'dimension' | 'level' | 'callout' | 'table' | 'ocr_note';
+  sourceText: string;
+  bbox: BoundingBox;
+  confidence: number;
+}
+
+export interface DrawingCadStructuredObject {
+  id: string;
+  pageNo: number;
+  objectType: 'legend_term' | 'normalized_term' | 'sheet_link' | 'business_document';
+  label: string;
+  canonical?: string | null;
+  confidence: number;
+}
+
+export interface DrawingCadStructuredDimension {
+  id: string;
+  pageNo: number;
+  label: string;
+  sourceText: string;
+  bbox: BoundingBox;
+  values: string[];
+  unit: string;
+  status: 'confirmed' | 'estimated' | 'blocked';
+  confidence: number;
+}
+
+export interface DrawingCadStructuredQuantity {
+  fieldName: string;
+  label: string;
+  value?: string | number;
+  confidence: number;
+  sourceText: string;
+  sourcePage: number;
+  sourceBox: BoundingBox;
+  requiresReview: boolean;
+  targetBlockType?: BlockType;
+  quantityUnit?: string;
+  itemName?: string;
+  specification?: string;
+  materialTakeoffMode?: MaterialTakeoffMode;
+  autoCreateBlock?: boolean;
+}
+
+export interface DrawingCadStructuredCondition {
+  id: string;
+  severity: OcrReviewQueueSeverity;
+  title: string;
+  detail: string;
+}
+
+export interface DrawingCadStructuredOutput {
+  documentSummary: {
+    fileName: string;
+    fileType: DrawingFileType;
+    pageCount: number;
+    drawingNo?: string | null;
+    drawingTitle?: string | null;
+    businessDocument: boolean;
+  };
+  pageAnalysis: DrawingCadStructuredPageAnalysis[];
+  drawingClassification: DrawingCadStructuredClassification[];
+  scaleAndUnits: {
+    sheetScale?: string | null;
+    sheetScaleRatio?: number | null;
+    lengthUnit: string;
+    elevationUnit: string;
+    viewDirection: string;
+  };
+  cadEntities: DrawingCadStructuredEntity[];
+  objects: DrawingCadStructuredObject[];
+  dimensions: DrawingCadStructuredDimension[];
+  quantities: DrawingCadStructuredQuantity[];
+  constructionConditions: DrawingCadStructuredCondition[];
+  warnings: string[];
+  stopReasons: string[];
+  confidenceReview: {
+    reviewRequired: boolean;
+    unresolvedCount: number;
+    ambiguousCount: number;
+    lowConfidenceCount: number;
+  };
+  missingInformation: string[];
+  recommendedNextInputs: string[];
+  humanSummary: string;
 }
 
 export interface PriceMasterItem {
@@ -87,6 +425,36 @@ export interface EstimateReportRow {
   unit: string;
   unitPrice: number;
   amount: number;
+  remarks: string;
+  sourceSummary: string;
+  /** 確信度（0-1）。モード別フィルタリングに使用 */
+  confidenceLevel?: number;
+  /** 保留フラグ。pendingモードで付与 */
+  isPending?: boolean;
+  /** 要確認フラグ。fullモードで付与 */
+  requiresReview?: boolean;
+}
+
+export interface ChangeEstimateRow {
+  id: string;
+  zoneName: string;
+  itemName: string;
+  specification: string;
+  quantity: number;
+  unit: string;
+  quantityShare: number;
+  baseAmount: number;
+  remobilizationCount: number;
+  remobilizationAmount: number;
+  temporaryRestorationRate: number;
+  temporaryRestorationQuantity: number;
+  temporaryRestorationAmount: number;
+  coordinationAdjustmentRate: number;
+  coordinationAdjustmentAmount: number;
+  totalAmount: number;
+  drawingPageRefs: number[];
+  notePhotoUrls: string[];
+  relatedTradeNames: string[];
   remarks: string;
   sourceSummary: string;
 }
@@ -119,12 +487,67 @@ export interface ReviewIssue {
 
 export interface GeneratedReportBundle {
   estimateRows: EstimateReportRow[];
+  changeEstimateRows: ChangeEstimateRow[];
   unitPriceEvidenceRows: UnitPriceEvidenceRow[];
   reviewIssues: ReviewIssue[];
   summary: {
     totalAmount: number;
     totalRows: number;
+    changeEstimateRowCount: number;
+    changeEstimateTotalAmount: number;
     requiresReviewCount: number;
+  };
+  /** 出力モード（3択） */
+  outputMode?: EstimateOutputMode;
+  /** モード別サマリ */
+  modeSummary?: {
+    confirmedCount: number;
+    pendingCount: number;
+    fullCount: number;
+    confirmedAmount: number;
+    pendingAmount: number;
+    fullAmount: number;
+  };
+}
+
+/**
+ * 見積出力モード（3択）
+ * - confirmed: 確定版 — 確信度80%以上のみ採用。事故らない最小見積。
+ * - pending:   保留版 — 確信度50%以上を採用（保留フラグ付き）。概算見積として使用可能。
+ * - full:      全出力版 — 全読み取り結果を出力（要確認フラグ付き）。最大網羅版。
+ */
+export type EstimateOutputMode = 'confirmed' | 'pending' | 'full';
+
+export type OcrStampStatus = 'adopted' | 'pending' | 'excluded' | 'none';
+
+export type WorkbookAuditStatus = 'matched' | 'mismatch' | 'missing_block' | 'unsupported_logic';
+
+export interface WorkbookAuditRow {
+  id: string;
+  section: string;
+  itemName: string;
+  specification: string;
+  workbookQuantity: number;
+  workbookUnit: string;
+  appQuantity: number | null;
+  appUnit: string | null;
+  difference: number | null;
+  status: WorkbookAuditStatus;
+  workbookLogic: string;
+  appLogic: string;
+  notes: string[];
+}
+
+export interface WorkbookAuditBundle {
+  projectLabel: string;
+  sourceWorkbook: string;
+  rows: WorkbookAuditRow[];
+  summary: {
+    totalRows: number;
+    matchedRows: number;
+    mismatchRows: number;
+    missingRows: number;
+    unsupportedRows: number;
   };
 }
 
@@ -143,6 +566,17 @@ export interface Drawing {
   ocrItems: OcrItem[];
   aiCandidates: AICandidate[];
   workTypeCandidates: WorkTypeCandidate[];
+  mediaRoute?: DrawingMediaRoute;
+  titleBlockMeta?: DrawingTitleBlockMeta;
+  sheetClassification?: DrawingSheetClassification;
+  resolvedUnits?: DrawingResolvedUnits;
+  legendResolution?: DrawingLegendResolution;
+  ocrStructured?: DrawingOcrStructured;
+  cadStructured?: DrawingCadStructuredOutput;
+  reviewQueue: OcrReviewQueueItem[];
+  manualResolutions: DrawingManualResolution[];
+  manualMeasurements: DrawingManualMeasurement[];
+  measurementCalibrations: DrawingMeasurementCalibration[];
   uploadedAt: string;
   lastParsedAt?: string;
   lastError?: string;
@@ -158,6 +592,19 @@ export interface Project {
   blocks: EstimateBlock[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface EstimateZone {
+  id: string;
+  name: string;
+  primaryQuantity: number;
+  drawingPageRefs: number[];
+  notePhotoUrls: string[];
+  relatedTradeNames: string[];
+  remobilizationCount: number;
+  temporaryRestorationRate: number;
+  coordinationAdjustmentRate: number;
+  note: string;
 }
 
 export interface EstimateBlock {
@@ -192,6 +639,69 @@ export interface EstimateBlock {
   binderThickness: number;
   demolitionWidth: number;
   demolitionThickness: number;
+  countQuantity: number;
+  countUnit: string;
+  materialTakeoffMode: MaterialTakeoffMode;
+  materialArea: number;
+  materialThickness: number;
+  materialVolumeFactor: number;
+  materialDensity: number;
+  materialDirectQuantity: number;
+  customUnitPrice: number;
+  splitPhaseCount: number;
+  remobilizationCount: number;
+  temporaryRestorationRate: number;
+  coordinationAdjustmentRate: number;
+  // 地盤条件・ほぐし係数（SiteConditionFactors）
+  // 空文字 = デフォルト(砂質土 L=1.25)。groundConditions のname値を入れる
+  groundCondition: string;
+  // 外構工事
+  exteriorArea: number;
+  exteriorDepth: number;
+  exteriorFinishUnitPrice: number;
+  // 型枠工事
+  formworkArea: number;
+  formworkType: string; // 'foundation' | 'wall' | 'slab'
+  // 土間コンクリ
+  slabArea: number;
+  slabThickness: number;
+  slabStoneThickness: number;
+  slabHasWireMesh: boolean;
+  // フェンス
+  fenceLength: number;
+  fenceHeight: number;
+  fenceType: string; // 'mesh' | 'blind' | 'pc'
+  fencePostInterval: number;
+  fencePostUnitPrice: number;
+  fencePanelUnitPrice: number;
+  // ブロック設置
+  blockArea: number;
+  blockLength: number;
+  blockHeight: number;
+  blockThickness: number; // 100/120/150/190mm
+  // 型枠ブロック
+  formworkBlockArea: number;
+  formworkBlockLength: number;
+  formworkBlockHeight: number;
+  formworkBlockThickness: number;
+  // 構造物設置 (既存count_structureを拡張)
+  structureName: string;
+  structureQuantity: number;
+  structureUnit: string;
+  structureUnitPrice: number;
+  // 自費工事
+  selfFundedName: string;
+  selfFundedQuantity: number;
+  selfFundedUnit: string;
+  selfFundedUnitPrice: number;
+  // 切盛土
+  cutVolume: number;
+  fillVolume: number;
+  cutFillSoilType: string;
+  cutFillDisposalDistance: number;
+  cutFillSlopeHeight: number;
+  cutFillSlopeGradient: number;
+  zones: EstimateZone[];
   requiresReviewFields: string[];
   appliedCandidateIds: string[];
 }
@@ -236,6 +746,27 @@ export interface CalculationEvidence {
   sourcePage: string | null;
   reason: string;
   requiresReview: boolean;
+}
+
+export interface CalculationZoneBreakdown {
+  id: string;
+  name: string;
+  primaryQuantity: number;
+  primaryUnit: string;
+  quantityShare: number;
+  baseAmount: number;
+  remobilizationCount: number;
+  remobilizationAmount: number;
+  temporaryRestorationRate: number;
+  temporaryRestorationQuantity: number;
+  temporaryRestorationAmount: number;
+  coordinationAdjustmentRate: number;
+  coordinationAdjustmentAmount: number;
+  totalAmount: number;
+  drawingPageRefs: number[];
+  notePhotoUrls: string[];
+  relatedTradeNames: string[];
+  note: string;
 }
 
 export interface CalculationResult {
@@ -301,6 +832,7 @@ export interface CalculationResult {
   detailSections: CalculationDetailSection[];
   lineItems: CalculationLineItem[];
   priceEvidence: CalculationEvidence[];
+  zoneBreakdowns: CalculationZoneBreakdown[];
 }
 
 export interface AppState {
@@ -338,6 +870,22 @@ export interface ParseDrawingResponse {
     sourceTexts: string[];
     requiresReview: boolean;
   }>;
+  mediaRoute?: DrawingMediaRoute;
+  titleBlock?: DrawingTitleBlockMeta;
+  sheetClassification?: DrawingSheetClassification;
+  resolvedUnits?: DrawingResolvedUnits;
+  legendResolution?: DrawingLegendResolution;
+  ocrStructured?: DrawingOcrStructured;
+  cadStructured?: DrawingCadStructuredOutput;
+  reviewQueue?: Array<{
+    queue: string;
+    severity: OcrReviewQueueSeverity;
+    title: string;
+    detail: string;
+    sourceText?: string;
+    sourcePage?: number;
+    fieldName?: string;
+  }>;
   ocrLines: string[];
   ocrItems: Array<{
     text: string;
@@ -350,17 +898,23 @@ export interface ParseDrawingResponse {
     width: number;
     height: number;
     page: number;
+    physicalWidthMm?: number | null;
+    physicalHeightMm?: number | null;
   };
   pagePreviews?: Array<{
     imageUrl: string;
     width: number;
     height: number;
     page: number;
+    physicalWidthMm?: number | null;
+    physicalHeightMm?: number | null;
   }>;
   debug?: Record<string, unknown>;
 }
 
 export interface ReportGenerationRequest {
+  /** 見積出力モード（3択）。省略時は 'confirmed' */
+  outputMode?: EstimateOutputMode;
   projectId?: string;
   blockId?: string;
   drawingId?: string | null;
@@ -368,6 +922,36 @@ export interface ReportGenerationRequest {
   project?: Project;
   block?: EstimateBlock;
   drawing?: Drawing | null;
+}
+
+export interface ChangeEstimateReportHeader {
+  issueDate: string;
+  recipientName: string;
+  constructionName: string;
+  changeReason: string;
+}
+
+export interface ChangeEstimatePdfRequest extends ReportGenerationRequest {
+  header: ChangeEstimateReportHeader;
+}
+
+export interface OcrLearningContext {
+  planSectionLinks: OcrLearningEntry[];
+}
+
+export function createDefaultEstimateZone(name: string = 'A棟前'): EstimateZone {
+  return {
+    id: crypto.randomUUID(),
+    name,
+    primaryQuantity: 0,
+    drawingPageRefs: [],
+    notePhotoUrls: [],
+    relatedTradeNames: [],
+    remobilizationCount: 0,
+    temporaryRestorationRate: 0,
+    coordinationAdjustmentRate: 0,
+    note: '',
+  };
 }
 
 export function createDefaultBlock(projectId: string, name: string = '新規見積', drawingId: string | null = null): EstimateBlock {
@@ -403,6 +987,67 @@ export function createDefaultBlock(projectId: string, name: string = '新規見�
     binderThickness: 0,
     demolitionWidth: 0,
     demolitionThickness: 0,
+    countQuantity: 0,
+    countUnit: '箇所',
+    materialTakeoffMode: 'm3',
+    materialArea: 0,
+    materialThickness: 0,
+    materialVolumeFactor: 1,
+    materialDensity: 0,
+    materialDirectQuantity: 0,
+    customUnitPrice: 0,
+    splitPhaseCount: 1,
+    remobilizationCount: 0,
+    temporaryRestorationRate: 0,
+    coordinationAdjustmentRate: 0,
+    groundCondition: '',      // 空文字 = 砂質土標準（L=1.25）
+    // 外構工事
+    exteriorArea: 0,
+    exteriorDepth: 0,
+    exteriorFinishUnitPrice: 0,
+    // 型枠工事
+    formworkArea: 0,
+    formworkType: 'foundation',
+    // 土間コンクリ
+    slabArea: 0,
+    slabThickness: 0.15,
+    slabStoneThickness: 0.10,
+    slabHasWireMesh: true,
+    // フェンス
+    fenceLength: 0,
+    fenceHeight: 1.0,
+    fenceType: 'mesh',
+    fencePostInterval: 2.0,
+    fencePostUnitPrice: 0,
+    fencePanelUnitPrice: 0,
+    // ブロック設置
+    blockArea: 0,
+    blockLength: 0,
+    blockHeight: 0,
+    blockThickness: 0.12,
+    // 型枠ブロック
+    formworkBlockArea: 0,
+    formworkBlockLength: 0,
+    formworkBlockHeight: 0,
+    formworkBlockThickness: 0.15,
+    // 構造物設置
+    structureName: '',
+    structureQuantity: 0,
+    structureUnit: '箇所',
+    structureUnitPrice: 0,
+    // 自費工事
+    selfFundedName: '',
+    selfFundedQuantity: 0,
+    selfFundedUnit: '式',
+    selfFundedUnitPrice: 0,
+    // 切盛土
+    cutVolume: 0,
+    fillVolume: 0,
+    cutFillSoilType: '',
+    cutFillDisposalDistance: 0,
+    cutFillSlopeHeight: 0,
+    cutFillSlopeGradient: 1.5,
+    zones: [],
     requiresReviewFields: [],
     appliedCandidateIds: [],
   };
@@ -424,6 +1069,10 @@ export function createDefaultDrawing(projectId: string, name: string = '図面�
     ocrItems: [],
     aiCandidates: [],
     workTypeCandidates: [],
+    reviewQueue: [],
+    manualResolutions: [],
+    manualMeasurements: [],
+    measurementCalibrations: [],
     uploadedAt: new Date().toISOString(),
   };
 }

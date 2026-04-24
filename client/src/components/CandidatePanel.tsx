@@ -16,6 +16,12 @@ function renderCandidateValue(candidate: AICandidate) {
   return candidate.valueText ?? candidate.valueNumber ?? '-';
 }
 
+function renderOriginLabel(candidate: AICandidate): string | null {
+  if (candidate.candidateOrigin === 'manual_measurement') return '手動計測';
+  if (candidate.candidateOrigin === 'cad_structured') return 'CAD構造化';
+  return null;
+}
+
 export default function CandidatePanel({
   candidates,
   activeCandidateId,
@@ -82,6 +88,11 @@ export default function CandidatePanel({
                   <div className="mt-1 text-sm font-semibold text-slate-900">{renderCandidateValue(candidate)}</div>
                 </button>
                 <div className="flex items-center gap-2">
+                  {renderOriginLabel(candidate) && (
+                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-800">
+                      {renderOriginLabel(candidate)}
+                    </span>
+                  )}
                   <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] text-slate-700">
                     {Math.round(candidate.confidence * 100)}%
                   </span>

@@ -119,17 +119,52 @@ async function insertMasterItems(items: PriceMasterItem[]): Promise<void> {
   });
 }
 
+async function syncSeedMasterItems(items: PriceMasterItem[]): Promise<void> {
+  if (items.length === 0) return;
+
+  await withPgTransaction(async (client) => {
+    for (const item of items) {
+      await client.query(
+        `
+          INSERT INTO price_master_items (
+            id, master_type, code, name, aliases, unit_price, unit,
+            effective_from, effective_to, source_name, source_version, source_page,
+            vendor, region, notes, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5::text[], $6, $7,
+            $8::date, $9::date, $10, $11, $12,
+            $13, $14, $15, NOW()
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            aliases = ARRAY(
+              SELECT DISTINCT alias
+              FROM unnest(price_master_items.aliases || EXCLUDED.aliases) AS alias
+            ),
+            notes = CASE
+              WHEN COALESCE(price_master_items.notes, '') = '' THEN EXCLUDED.notes
+              ELSE price_master_items.notes
+            END,
+            updated_at = NOW()
+        `,
+        toRow(item),
+      );
+    }
+  });
+}
+
 async function ensureSeeded(): Promise<void> {
   if (!seedPromise) {
     seedPromise = (async () => {
       const countResult = await pgQuery<{ count: string }>('SELECT COUNT(*)::text AS count FROM price_master_items');
-      if (Number(countResult.rows[0]?.count ?? '0') > 0) {
-        return;
+      const existingCount = Number(countResult.rows[0]?.count ?? '0');
+
+      if (existingCount === 0) {
+        const legacyItems = await loadLegacyMasterItems();
+        const initialItems = legacyItems && legacyItems.length > 0 ? legacyItems : createSeedMasterItems();
+        await insertMasterItems(initialItems);
       }
 
-      const legacyItems = await loadLegacyMasterItems();
-      const seedItems = legacyItems && legacyItems.length > 0 ? legacyItems : createSeedMasterItems();
-      await insertMasterItems(seedItems);
+      await syncSeedMasterItems(createSeedMasterItems());
     })();
   }
   return seedPromise;

@@ -1,0 +1,54 @@
+{
+  "sourceSkills": [
+    "/Users/user/Desktop/賞与/名称未設定フォルダ/skills/ocr-parse-skill/SKILL.md",
+    "/Users/user/Desktop/賞与/名称未設定フォルダ/skills/layout_structure_skill/SKILL.md",
+    "/Users/user/Desktop/賞与/名称未設定フォルダ/skills/validation_skill/SKILL.md",
+    "/Users/user/Desktop/賞与/名称未設定フォルダ/skills/common-master/prompt_core.md",
+    "/Users/user/Desktop/賞与/名称未設定フォルダ/skills/common-master/safety_gate.md",
+    "/Users/user/Desktop/賞与/名称未設定フォルダ/skills/common-master/schema.md"
+  ],
+  "ocrWatchPairs": [
+    ["GL", "GI", "G1"],
+    ["FH", "EL", "FL"],
+    ["0", "O", "D"],
+    ["1", "I", "l", "7"],
+    ["8", "3"],
+    ["300", "30O", "3OO"],
+    ["+1.250", "+7.250"],
+    ["m", "mm", "cm"],
+    ["m2", "㎡", "m²"],
+    ["m3", "㎥", "m³"]
+  ],
+  "levelTokens": ["GL", "GI", "G1", "FH", "EL", "FL", "計画高", "現況高"],
+  "unitPatterns": [
+    {"unit": "m", "patterns": ["m", "Ｍ"]},
+    {"unit": "mm", "patterns": ["mm", "㎜"]},
+    {"unit": "cm", "patterns": ["cm", "㎝"]},
+    {"unit": "m2", "patterns": ["m2", "m^2", "㎡", "m²"]},
+    {"unit": "m3", "patterns": ["m3", "m^3", "㎥", "m³"]}
+  ],
+  "pageRoleKeywords": {
+    "plan": ["平面図", "配置図", "排水計画図", "計画平面図", "伏図"],
+    "section": ["断面図", "横断図", "縦断図", "A-A", "B-B"],
+    "detail": ["詳細図", "構造図", "配筋図", "基礎詳細", "標準断面図"],
+    "spec": ["仕様", "特記仕様", "標準図", "数量表", "材料表"],
+    "legend": ["凡例", "記号", "略号"]
+  },
+  "calloutPatterns": [
+    "A-A",
+    "B-B",
+    "C-C",
+    "詳細1",
+    "詳細-1",
+    "DETAIL 1",
+    "00-19-1143",
+    "QF-ADT-F-001-00"
+  ],
+  "safetyGate": {
+    "requireEvidenceForConfirmedQuantities": true,
+    "stopOnWeakSectionEvidence": true,
+    "stopOnWeakLevelEvidence": true,
+    "keepUnresolvedItems": true,
+    "noSilentLowConfidenceUse": true
+  }
+}

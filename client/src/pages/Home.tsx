@@ -2,30 +2,74 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderKanban, Plus, Workflow } from 'lucide-react';
 import Header from '@/components/Header';
 import EstimateList from '@/components/EstimateList';
+import StepIndicator, { type WorkflowStep } from '@/components/StepIndicator';
+import GmailInboxPanel from '@/components/GmailInboxPanel';
 import InputForm from '@/components/InputForm';
 import CalculationResults from '@/components/CalculationResults';
 import SaveBar from '@/components/SaveBar';
 import OcrReviewPanel from '@/components/OcrReviewPanel';
+import type { OcrReviewPanelHandle } from '@/components/OcrReviewPanel';
 import DocumentPanel from '@/components/DocumentPanel';
+import EstimateModeSelector from '@/components/EstimateModeSelector';
 import { calculate } from '@/lib/calculations';
-import { fetchMasters, generateReport, parseDrawing } from '@/lib/api';
-import { createSeedMasterItems } from '@/lib/masterData';
+import {
+  buildDistanceMeasurementName,
+  buildPolygonMeasurementName,
+  calculateMetersPerPixelFromReference,
+  convertAreaPixelsToSquareMeters,
+  convertDistancePixelsToMeters,
+  calculateDistancePixels,
+  calculatePolygonAreaPixels,
+} from '@/lib/ocrMeasurements';
+import {
+  correctOcrText,
+  fetchMasters,
+  fetchOcrLearningEntries,
+  generateReport,
+  getAiApiUnavailableMessage,
+  isAiApiAvailable,
+  parseDrawing,
+  runEstimationLogic,
+  savePlanSectionLearning,
+  type OcrParseJobState,
+} from '@/lib/api';
+import { canonicalizeMasterName, createSeedMasterItems } from '@/lib/masterData';
+import { buildLevelConflictGroups, groupPlanSectionLinksByCallout, isLevelWatchGroup } from '@/lib/ocrInsights';
+import { productLengths } from '@/lib/priceData';
 import {
   createDefaultBlock,
+  createDefaultEstimateZone,
   createDefaultProject,
   createInitialAppState,
   type AICandidate,
   type AppState,
   type BlockType,
+  type BoundingBox,
   type Drawing,
+  type DrawingDistanceMeasurement,
+  type DrawingManualResolution,
+  type DrawingMeasurementPoint,
+  type DrawingMeasurementCalibration,
   type EstimateBlock,
+  type EstimateZone,
+  type EstimateOutputMode,
   type GeneratedReportBundle,
+  type MasterType,
+  type OcrLearningContext,
+  type OcrLearningEntry,
+  type OcrReviewQueueItem,
+  type OcrStampStatus,
   type ParseDrawingResponse,
   type PriceMasterItem,
   type Project,
 } from '@/lib/types';
 import { loadData, saveData } from '@/lib/storage';
+import { getWorkspaceId } from '@/lib/workspace';
 import { getWorkTypeLabel } from '@/lib/workTypes';
+import { buildProjectWorkbookAudit } from '@/lib/workbookAudit';
+import type { EstimationLogicRunResponse } from '@shared/estimationLogic';
+import { getShiroyamaLogicForBlockType, SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC } from '@shared/shiroyamaExteriorEstimateLogic';
+import { getShinmoriLogicForBlockType, SHINMORI_DISTRICT_ROAD_ESTIMATE_LOGIC } from '@shared/shinmoriDistrictRoadEstimateLogic';
 import { toast } from 'sonner';
 
 const CANDIDATE_LABELS: Record<string, string> = {
@@ -44,26 +88,41 @@ const CANDIDATE_LABELS: Record<string, string> = {
   binderThickness: '基層厚',
   demolitionWidth: '撤去幅',
   demolitionThickness: '撤去厚',
+  countQuantity: '数量',
+  countUnit: '数量単位',
+  materialDirectQuantity: '直接数量',
+  materialArea: '基準面積',
+  materialThickness: '層厚 / 改良厚',
 };
 
 const EMPTY_REPORT_BUNDLE: GeneratedReportBundle = {
   estimateRows: [],
+  changeEstimateRows: [],
   unitPriceEvidenceRows: [],
   reviewIssues: [],
   summary: {
     totalAmount: 0,
     totalRows: 0,
+    changeEstimateRowCount: 0,
+    changeEstimateTotalAmount: 0,
     requiresReviewCount: 0,
   },
 };
 
-function GuideStep({ step, title, description }: { step: string; title: string; description: string }) {
+function GuideStep({ step, title, description, onActivate }: { step: string; title: string; description: string; onActivate?: () => void }) {
+  const isInteractive = typeof onActivate === 'function';
+
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+    <button
+      type="button"
+      onClick={onActivate}
+      className={`w-full rounded-md border px-3 py-2 text-left ${isInteractive ? 'border-indigo-200 bg-indigo-50 transition-colors hover:bg-indigo-100' : 'border-slate-200 bg-slate-50'}`}
+    >
       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{step}</div>
       <div className="mt-1 text-sm font-semibold text-slate-800">{title}</div>
       <p className="mt-1 text-xs leading-5 text-slate-600">{description}</p>
-    </div>
+      {isInteractive && <div className="mt-2 text-[11px] font-semibold text-indigo-700">クリックでアップロードを開始</div>}
+    </button>
   );
 }
 
@@ -82,29 +141,315 @@ function ProjectCard({ project, isActive, onSelect }: { project: Project; isActi
   );
 }
 
+function ReviewQueueBadge({ item }: { item: OcrReviewQueueItem }) {
+  const tone = item.severity === 'critical'
+    ? 'border-rose-200 bg-rose-50 text-rose-800'
+    : item.severity === 'warning'
+      ? 'border-amber-200 bg-amber-50 text-amber-800'
+      : 'border-slate-200 bg-slate-50 text-slate-700';
+
+  return (
+    <div className={`rounded-md border px-3 py-2 ${tone}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-[0.16em]">{item.queue}</div>
+        <div className="text-[11px] font-semibold uppercase">{item.severity}</div>
+      </div>
+      <div className="mt-1 text-sm font-semibold">{item.title}</div>
+      <div className="mt-1 text-xs leading-5">{item.detail}</div>
+      {(item.sourceText || item.sourcePage) && (
+        <div className="mt-2 text-[11px] leading-5 opacity-80">
+          {item.sourcePage ? `p.${item.sourcePage}` : ''}{item.sourcePage && item.sourceText ? ' / ' : ''}{item.sourceText ?? ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EstimationLogicCard({ run, loading, error }: { run: EstimationLogicRunResponse | null; loading: boolean; error: string | null }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+        <Workflow className="h-4 w-4 text-emerald-600" />
+        AI見積 Logic
+      </div>
+
+      {loading && (
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          見積ロジックを実行しています。
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && !run && (
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          図面 OCR 完了後に、ここへ「次にやること」が表示されます。
+        </div>
+      )}
+
+      {run && (
+        <>
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">decision</div>
+            <div className="mt-1 text-lg font-bold text-slate-900">{run.execution.decision}</div>
+            <div className="mt-2 text-sm leading-6 text-slate-700">{run.execution.summary}</div>
+            <div className="mt-2 text-xs text-slate-500">
+              mode: <span className="font-semibold text-slate-700">{run.audit.mode}</span>
+              {run.audit.model ? <> / model: <span className="font-semibold text-slate-700">{run.audit.model}</span></> : null}
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-md border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800">次にやること</div>
+            <div className="space-y-2 p-3">
+              {run.execution.nextActions.map((item) => (
+                <div key={item} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-sm font-semibold text-slate-900">担当者メッセージ</div>
+            <div className="mt-2 text-sm leading-6 text-slate-700">{run.execution.operatorMessage}</div>
+          </div>
+
+          {run.execution.stopReasons.length > 0 && (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3">
+              <div className="text-sm font-semibold text-amber-900">止めている理由</div>
+              <div className="mt-2 space-y-2">
+                {run.execution.stopReasons.map((item) => (
+                  <div key={item} className="text-sm leading-6 text-amber-800">{item}</div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {run.audit.warnings.length > 0 && (
+            <div className="mt-3 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-3">
+              <div className="text-sm font-semibold text-indigo-900">実行メモ</div>
+              <div className="mt-2 space-y-2">
+                {run.audit.warnings.map((item) => (
+                  <div key={item} className="text-sm leading-6 text-indigo-800">{item}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function isShiroyamaProjectLike(project: Project | null): boolean {
+  if (!project) return false;
+  const text = [
+    project.name,
+    project.clientName,
+    project.siteName,
+    ...project.drawings.map((drawing) => `${drawing.fileName} ${drawing.name} ${drawing.drawingTitle}`),
+  ].join(' ');
+  return ['城山', '都井沢', 'クリエイト'].some((keyword) => text.includes(keyword));
+}
+
+function isShinmoriProjectLike(project: Project | null): boolean {
+  if (!project) return false;
+  const text = [
+    project.name,
+    project.clientName,
+    project.siteName,
+    ...project.drawings.map((drawing) => `${drawing.fileName} ${drawing.name} ${drawing.drawingTitle}`),
+  ].join(' ');
+  return ['新産業の森', '藤沢市', '地区画道路', '造成工事その２'].some((keyword) => text.includes(keyword));
+}
+
+function WorkbookLogicCard({ project, blockType }: { project: Project | null; blockType: BlockType }) {
+  const logicProfile = isShinmoriProjectLike(project)
+    ? SHINMORI_DISTRICT_ROAD_ESTIMATE_LOGIC
+    : SHIROYAMA_EXTERIOR_ESTIMATE_LOGIC;
+  const rules = isShinmoriProjectLike(project)
+    ? getShinmoriLogicForBlockType(blockType)
+    : getShiroyamaLogicForBlockType(blockType);
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="text-sm font-semibold text-slate-800">今回の内訳一致ロジック</div>
+      <div className="mt-1 text-[11px] leading-5 text-slate-500">
+        {logicProfile.projectLabel} の内訳書と図面から整理した数量解釈です。
+      </div>
+      <div className="mt-3 space-y-3">
+        {rules.map((rule) => (
+          <div key={rule.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{rule.title}</div>
+            <div className="mt-1 text-sm leading-6 text-slate-800">{rule.interpretation}</div>
+            <div className="mt-2 text-xs font-semibold text-slate-700">式: {rule.formula}</div>
+            <div className="mt-2 space-y-1">
+              {rule.workbookExamples.map((example) => (
+                <div key={example} className="text-[11px] leading-5 text-slate-600">・{example}</div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type LevelAdoptionTarget = 'currentHeight' | 'plannedHeight' | 'resolve_only';
+
+function LevelAdoptionModal({
+  open,
+  title,
+  candidateText,
+  candidateValue,
+  suggestedField,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  candidateText: string;
+  candidateValue: string | null;
+  suggestedField: keyof EstimateBlock | null;
+  onClose: () => void;
+  onConfirm: (target: LevelAdoptionTarget) => void;
+}) {
+  if (!open) return null;
+
+  const canApplyNumeric = candidateValue !== null && candidateValue !== '' && !Number.isNaN(Number(candidateValue));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4">
+      <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-2xl">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <div className="text-sm font-semibold text-slate-800">高さラベル候補の採用確認</div>
+          <div className="mt-1 text-xs leading-5 text-slate-500">
+            bbox 比較で選んだ候補を、review 解消だけに使うか、現況高 / 計画高へ反映するかを選びます。
+          </div>
+        </div>
+
+        <div className="space-y-3 px-5 py-4">
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{title}</div>
+            <div className="mt-2 text-sm font-semibold text-slate-900">{candidateText}</div>
+            <div className="mt-2 text-xs text-slate-600">
+              抽出値: <span className="font-semibold text-slate-900">{candidateValue ?? '数値なし'}</span>
+              {suggestedField ? (
+                <span className="ml-2 text-slate-500">推奨反映先: {CANDIDATE_LABELS[suggestedField] || suggestedField}</span>
+              ) : null}
+            </div>
+          </div>
+
+          {!canApplyNumeric && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+              数値を確定できないため、この候補は review 解消のみ可能です。
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm('resolve_only')}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            bbox 採用だけ記録
+          </button>
+          <button
+            type="button"
+            disabled={!canApplyNumeric}
+            onClick={() => onConfirm('currentHeight')}
+            className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            現況高へ反映
+          </button>
+          <button
+            type="button"
+            disabled={!canApplyNumeric}
+            onClick={() => onConfirm('plannedHeight')}
+            className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            計画高へ反映
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function updateProjectCollection(projects: Project[], projectId: string, updater: (project: Project) => Project): Project[] {
   return projects.map((project) => (project.id === projectId ? updater(project) : project));
 }
 
-function buildDrawingFromParseResponse(projectId: string, file: File, payload: ParseDrawingResponse): Drawing {
+function normalizeCalloutForLearning(callout: string): string {
+  const normalized = callout
+    .replace(/[ー–−]/g, '-')
+    .replace(/詳細図?/g, 'DETAIL')
+    .replace(/\s+/g, '')
+    .toUpperCase();
+  if (normalized.startsWith('DETAIL') && !normalized.startsWith('DETAIL-')) {
+    return normalized.replace(/^DETAIL/, 'DETAIL-');
+  }
+  return normalized;
+}
+
+function masterTypeForCandidate(fieldName: string, blockType: BlockType): MasterType | null {
+  if (fieldName === 'secondaryProduct' && blockType === 'secondary_product') {
+    return 'secondary_product';
+  }
+  if (fieldName === 'machine') return 'machine';
+  if (fieldName === 'dumpTruck') return 'dump_truck';
+  if (fieldName === 'crushedStone') return 'crushed_stone';
+  if (fieldName === 'concrete') return 'concrete';
+  return null;
+}
+
+function buildDrawingFromParseResponse(
+  projectId: string,
+  file: File,
+  payload: ParseDrawingResponse,
+  blockType: BlockType,
+  masters: PriceMasterItem[],
+  effectiveDate: string,
+): Drawing {
   const previews = payload.pagePreviews && payload.pagePreviews.length > 0 ? payload.pagePreviews : [payload.pagePreview];
 
   const aiCandidates: AICandidate[] = Object.entries(payload.aiCandidates || {}).map(([fieldName, candidate]) => {
     const valueType = candidate.valueType ?? (typeof candidate.valueNumber === 'number' || typeof candidate.value === 'number' ? 'number' : 'string');
+    const rawTextValue = candidate.valueText ?? (typeof candidate.value === 'string' ? candidate.value : undefined);
+    const masterType = valueType === 'string' ? masterTypeForCandidate(fieldName, blockType) : null;
+    const normalized = rawTextValue && masterType
+      ? canonicalizeMasterName(masters, masterType, rawTextValue, effectiveDate)
+      : null;
+    const valueText = normalized?.value ?? rawTextValue;
+    const matchedMaster = normalized?.matched ?? false;
 
     return {
       id: crypto.randomUUID(),
       fieldName,
       label: candidate.label || CANDIDATE_LABELS[fieldName] || fieldName,
       valueType,
-      valueText: candidate.valueText ?? (typeof candidate.value === 'string' ? candidate.value : undefined),
+      valueText,
       valueNumber: candidate.valueNumber ?? (typeof candidate.value === 'number' ? candidate.value : undefined),
       confidence: candidate.confidence,
       sourceText: candidate.sourceText,
       sourcePage: candidate.sourcePage,
       sourceBox: candidate.sourceBox,
-      reason: candidate.reason,
-      requiresReview: candidate.requiresReview,
+      reason: matchedMaster ? `${candidate.reason} / 単価マスタ名へ正規化` : candidate.reason,
+      requiresReview: candidate.requiresReview || Boolean(masterType && rawTextValue && !matchedMaster),
+      candidateOrigin: 'ocr',
     };
   });
 
@@ -112,9 +457,9 @@ function buildDrawingFromParseResponse(projectId: string, file: File, payload: P
     id: crypto.randomUUID(),
     projectId,
     name: file.name,
-    drawingNo: '',
-    drawingTitle: file.name,
-    revision: 'A',
+    drawingNo: payload.titleBlock?.drawingNo ?? '',
+    drawingTitle: payload.titleBlock?.drawingTitle || file.name,
+    revision: payload.titleBlock?.revision ?? 'A',
     fileName: payload.drawingSource.fileName || file.name,
     fileType: payload.drawingSource.fileType,
     status: 'ready',
@@ -125,6 +470,8 @@ function buildDrawingFromParseResponse(projectId: string, file: File, payload: P
       imageUrl: preview.imageUrl,
       width: preview.width,
       height: preview.height,
+      physicalWidthMm: preview.physicalWidthMm ?? null,
+      physicalHeightMm: preview.physicalHeightMm ?? null,
     })),
     ocrItems: payload.ocrItems.map((item) => ({
       id: crypto.randomUUID(),
@@ -134,6 +481,16 @@ function buildDrawingFromParseResponse(projectId: string, file: File, payload: P
       box: item.box,
     })),
     aiCandidates,
+    mediaRoute: payload.mediaRoute,
+    titleBlockMeta: payload.titleBlock,
+    sheetClassification: payload.sheetClassification,
+    resolvedUnits: payload.resolvedUnits,
+    legendResolution: payload.legendResolution,
+    cadStructured: payload.cadStructured,
+    ocrStructured: payload.ocrStructured ? {
+      ...payload.ocrStructured,
+      learningMatches: payload.ocrStructured.learningMatches ?? [],
+    } : undefined,
     workTypeCandidates: (payload.workTypeCandidates || []).map((candidate) => ({
       id: crypto.randomUUID(),
       blockType: candidate.blockType,
@@ -143,9 +500,131 @@ function buildDrawingFromParseResponse(projectId: string, file: File, payload: P
       sourceTexts: candidate.sourceTexts,
       requiresReview: candidate.requiresReview,
     })),
+    reviewQueue: (payload.reviewQueue || []).map((item) => ({
+      id: crypto.randomUUID(),
+      queue: item.queue,
+      severity: item.severity,
+      title: item.title,
+      detail: item.detail,
+      sourceText: item.sourceText,
+      sourcePage: item.sourcePage,
+      fieldName: item.fieldName,
+    })),
+    manualResolutions: [],
+    manualMeasurements: [],
+    measurementCalibrations: [],
     uploadedAt: new Date().toISOString(),
     lastParsedAt: new Date().toISOString(),
   };
+}
+
+function upsertManualResolution(
+  resolutions: DrawingManualResolution[],
+  resolution: Omit<DrawingManualResolution, 'id' | 'resolvedAt'>,
+): DrawingManualResolution[] {
+  const nextResolution: DrawingManualResolution = {
+    ...resolution,
+    id: crypto.randomUUID(),
+    resolvedAt: new Date().toISOString(),
+  };
+  return [
+    ...resolutions.filter((item) => !(item.resolutionType === resolution.resolutionType && item.resolutionKey === resolution.resolutionKey)),
+    nextResolution,
+  ];
+}
+
+function resolveFieldForLevelGroup(groupId: string): keyof EstimateBlock | null {
+  if (groupId.includes('GL') || groupId.includes('GI') || groupId.includes('G1') || groupId.includes('現況高')) {
+    return 'currentHeight';
+  }
+  if (groupId === 'FH' || groupId.includes('計画高') || groupId.includes('計画GL')) {
+    return 'plannedHeight';
+  }
+  return null;
+}
+
+function deriveDrawingReviewQueue(drawing: Drawing | null): OcrReviewQueueItem[] {
+  if (!drawing) return [];
+
+  const ocrStructured = drawing.ocrStructured;
+  const manualResolutions = drawing.manualResolutions ?? [];
+  const resolvedLevelKeys = new Set(
+    manualResolutions
+      .filter((item) => item.resolutionType === 'level_conflict')
+      .map((item) => item.resolutionKey),
+  );
+  const resolvedLinkKeys = new Set(
+    manualResolutions
+      .filter((item) => item.resolutionType === 'plan_section_link')
+      .map((item) => item.resolutionKey),
+  );
+
+  const unresolvedLevelGroups = buildLevelConflictGroups(ocrStructured).filter((group) => !resolvedLevelKeys.has(group.id));
+  const unresolvedLinkGroups = groupPlanSectionLinksByCallout(ocrStructured).filter((group) => !resolvedLinkKeys.has(group.callout));
+  const remainingUnresolvedTargets = (ocrStructured?.unresolvedItems ?? []).filter((item) => {
+    if (item.target === '基準高ラベル') {
+      return unresolvedLevelGroups.length > 0;
+    }
+    if (item.target === '平面図と断面図/詳細図のリンク') {
+      return unresolvedLinkGroups.length > 0;
+    }
+    return true;
+  });
+  const nonLevelAmbiguousCount = (ocrStructured?.ambiguousCandidates ?? []).filter((candidate) => !isLevelWatchGroup(candidate.watchGroup)).length;
+
+  const retainedBaseQueue = drawing.reviewQueue.filter((item) => ![
+    'OCR watchlist に該当する候補あり',
+    '平面図と断面図/詳細図のリンクが未解決',
+    '未解決 OCR 項目があります',
+  ].includes(item.title));
+
+  const derivedItems: OcrReviewQueueItem[] = [];
+
+  if (nonLevelAmbiguousCount > 0) {
+    derivedItems.push({
+      id: 'derived-watchlist',
+      queue: 'ocr_router_review',
+      severity: 'warning',
+      title: 'OCR watchlist に該当する候補あり',
+      detail: `高さラベル以外の watchlist 候補が ${nonLevelAmbiguousCount} 件あります。`,
+    });
+  }
+
+  unresolvedLevelGroups.forEach((group) => {
+    derivedItems.push({
+      id: `level-${group.id}`,
+      queue: 'ocr_router_review',
+      severity: 'warning',
+      title: '高さラベル候補を確認',
+      detail: `${group.label} の候補が ${group.items.length} 件あります。bbox 比較から採用してください。`,
+      fieldName: resolveFieldForLevelGroup(group.id) ?? undefined,
+    });
+  });
+
+  unresolvedLinkGroups.forEach((group) => {
+    derivedItems.push({
+      id: `link-${group.callout}`,
+      queue: 'sheet_classification_review',
+      severity: 'info',
+      title: '図面リンク候補を確認',
+      detail: `${group.callout} の平面図 / 断面図 / 詳細図リンク候補が ${group.links.length} 件あります。採用して閉じてください。`,
+    });
+  });
+
+  const otherUnresolvedTargets = remainingUnresolvedTargets
+    .map((item) => item.target)
+    .filter((target) => target !== '基準高ラベル' && target !== '平面図と断面図/詳細図のリンク');
+  if (otherUnresolvedTargets.length > 0) {
+    derivedItems.push({
+      id: 'derived-unresolved',
+      queue: 'unit_scale_review',
+      severity: 'warning',
+      title: '未解決 OCR 項目があります',
+      detail: otherUnresolvedTargets.slice(0, 3).join(' / '),
+    });
+  }
+
+  return [...retainedBaseQueue, ...derivedItems];
 }
 
 function applyCandidateValue(block: EstimateBlock, candidate: AICandidate, drawingId: string | null): EstimateBlock {
@@ -173,10 +652,654 @@ function applyCandidateValue(block: EstimateBlock, candidate: AICandidate, drawi
   return nextBlock;
 }
 
+function buildCandidateKey(fieldName: string, value: string | number, sourceText: string, sourcePage: number): string {
+  return `${fieldName}::${String(value)}::${sourceText}::${sourcePage}`;
+}
+
+function dedupeCandidates(candidates: AICandidate[]): AICandidate[] {
+  const seen = new Set<string>();
+  const next: AICandidate[] = [];
+  candidates.forEach((candidate) => {
+    const value = candidate.valueType === 'number'
+      ? candidate.valueNumber ?? Number(candidate.valueText ?? 0)
+      : candidate.valueText ?? String(candidate.valueNumber ?? '');
+    const key = buildCandidateKey(candidate.fieldName, value, candidate.sourceText, candidate.sourcePage);
+    if (seen.has(key)) return;
+    seen.add(key);
+    next.push(candidate);
+  });
+  return next;
+}
+
+function getRealLengthForMeasurement(
+  measurement: DrawingDistanceMeasurement,
+  drawing: Drawing,
+): number | null {
+  const page = drawing.pages.find((item) => item.pageNo === measurement.pageNo);
+  if (!page) return null;
+  return convertDistancePixelsToMeters(
+    measurement.pixelLength,
+    page,
+    drawing.resolvedUnits,
+    drawing.measurementCalibrations,
+  );
+}
+
+function getRealAreaForMeasurement(
+  measurement: Drawing['manualMeasurements'][number],
+  drawing: Drawing,
+): number | null {
+  if (measurement.measurementType !== 'polygon') return null;
+  const page = drawing.pages.find((item) => item.pageNo === measurement.pageNo);
+  if (!page) return null;
+  return convertAreaPixelsToSquareMeters(
+    measurement.pixelArea,
+    page,
+    drawing.resolvedUnits,
+    drawing.measurementCalibrations,
+  );
+}
+
+function normalizeDimensionSourceText(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[‐‑‒–—―ーｰ－]/g, '-');
+}
+
+function inferMetersFromDimensionValue(rawValue: string, sourceText: string): number | null {
+  const numeric = Number(String(rawValue).replace(/,/g, ''));
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+
+  const normalized = normalizeDimensionSourceText(sourceText);
+  if (/CM/.test(normalized)) {
+    return Number((numeric / 100).toFixed(4));
+  }
+  if (/MM/.test(normalized) || numeric > 10) {
+    return Number((numeric / 1000).toFixed(4));
+  }
+  return Number(numeric.toFixed(4));
+}
+
+function buildDimensionBoxCandidate({
+  fieldName,
+  label,
+  valueType,
+  valueNumber,
+  valueText,
+  confidence,
+  sourceText,
+  sourcePage,
+  sourceBox,
+  reason,
+  requiresReview = true,
+}: {
+  fieldName: keyof EstimateBlock;
+  label: string;
+  valueType: 'number' | 'string';
+  valueNumber?: number;
+  valueText?: string;
+  confidence: number;
+  sourceText: string;
+  sourcePage: number;
+  sourceBox: BoundingBox;
+  reason: string;
+  requiresReview?: boolean;
+}): AICandidate {
+  return {
+    id: crypto.randomUUID(),
+    fieldName,
+    label,
+    valueType,
+    valueNumber,
+    valueText,
+    confidence,
+    sourceText,
+    sourcePage,
+    sourceBox,
+    reason,
+    requiresReview,
+    candidateOrigin: 'cad_structured',
+  };
+}
+
+function pickProductLengthCandidate(sourceText: string, values: string[]): string | null {
+  const normalizedValues = values
+    .map((value) => inferMetersFromDimensionValue(value, sourceText))
+    .filter((value): value is number => value !== null);
+  for (const value of normalizedValues) {
+    const matched = productLengths.find((item) => Math.abs(item.value - value) < 0.0001);
+    if (matched) return matched.name;
+  }
+  return null;
+}
+
+function buildDimensionDerivedCandidates(
+  drawing: Drawing,
+  block: EstimateBlock,
+): AICandidate[] {
+  const dimensions = drawing.cadStructured?.dimensions ?? [];
+  const recommendations: AICandidate[] = [];
+
+  dimensions.forEach((dimension) => {
+    const sourceText = dimension.sourceText ?? '';
+    const normalized = normalizeDimensionSourceText(sourceText);
+    const valuesInMeters = dimension.values
+      .map((value) => inferMetersFromDimensionValue(value, sourceText))
+      .filter((value): value is number => value !== null);
+    const firstValue = valuesInMeters[0] ?? null;
+    const secondValue = valuesInMeters[1] ?? null;
+    const thirdValue = valuesInMeters[2] ?? null;
+    const baseConfidence = Math.max(0.72, Math.min(0.9, dimension.confidence - 0.04));
+    const sourcePage = dimension.pageNo;
+    const sourceBox = dimension.bbox;
+
+    if (block.blockType === 'secondary_product') {
+      if (firstValue !== null && (/W\d|W=|幅/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productWidth',
+          label: CANDIDATE_LABELS.productWidth,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の W / 幅表記から製品幅候補を生成',
+        }));
+      }
+      if ((secondValue ?? firstValue) !== null && (/H\d|H=|高/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productHeight',
+          label: CANDIDATE_LABELS.productHeight,
+          valueType: 'number',
+          valueNumber: secondValue ?? firstValue ?? undefined,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の H / 高さ表記から製品高さ候補を生成',
+        }));
+      }
+      const productLength = pickProductLengthCandidate(sourceText, dimension.values);
+      if (productLength && (thirdValue !== null || /L\d|長/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productLength',
+          label: CANDIDATE_LABELS.productLength,
+          valueType: 'string',
+          valueNumber: undefined,
+          valueText: productLength,
+          confidence: baseConfidence - 0.03,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の長さ候補を製品長さ選択肢へ正規化',
+        }));
+      }
+    }
+
+    if (block.blockType === 'retaining_wall') {
+      if (firstValue !== null && (/W\d|W=|底版幅|底盤幅|幅/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productWidth',
+          label: CANDIDATE_LABELS.productWidth,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の W / 底版幅表記から底版幅候補を生成',
+        }));
+      }
+      if ((secondValue ?? firstValue) !== null && (/H\d|H=|壁高|擁壁高|高/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'productHeight',
+          label: CANDIDATE_LABELS.productHeight,
+          valueType: 'number',
+          valueNumber: secondValue ?? firstValue ?? undefined,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の H / 擁壁高表記から擁壁高候補を生成',
+        }));
+      }
+      if (firstValue !== null && /T\d|T=|厚/.test(normalized)) {
+        if (/砕石|RC40|栗石/.test(normalized)) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'crushedStoneThickness',
+            label: CANDIDATE_LABELS.crushedStoneThickness,
+            valueType: 'number',
+            valueNumber: firstValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.02,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の砕石厚表記から基礎砕石厚候補を生成',
+          }));
+        }
+        if (/均し|ベース|基礎|CON|コンクリ/.test(normalized)) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'baseThickness',
+            label: CANDIDATE_LABELS.baseThickness,
+            valueType: 'number',
+            valueNumber: firstValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.02,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の基礎厚表記から基礎コンクリート厚候補を生成',
+          }));
+        }
+      }
+    }
+
+    if (block.blockType === 'pavement') {
+      if (firstValue !== null && (/W\d|W=|幅員|舗装幅|幅/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'pavementWidth',
+          label: CANDIDATE_LABELS.pavementWidth,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の幅員表記から舗装幅候補を生成',
+        }));
+      }
+
+      const thicknessValues = valuesInMeters;
+      if (/AS|表層/.test(normalized) && thicknessValues[0] !== undefined) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'surfaceThickness',
+          label: CANDIDATE_LABELS.surfaceThickness,
+          valueType: 'number',
+          valueNumber: thicknessValues[0],
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の As / 表層厚から表層厚候補を生成',
+        }));
+      }
+      if ((/AS/.test(normalized) && thicknessValues.length >= 2) || /基層/.test(normalized)) {
+        const binderValue = /基層/.test(normalized) ? thicknessValues[0] : thicknessValues[1];
+        if (binderValue !== undefined) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'binderThickness',
+            label: CANDIDATE_LABELS.binderThickness,
+            valueType: 'number',
+            valueNumber: binderValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.03,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の基層厚表記から基層厚候補を生成',
+          }));
+        }
+      }
+      if ((/路盤|粒調|RC40/.test(normalized) && thicknessValues.length >= 1) || /上層/.test(normalized)) {
+        const baseValue = /上層/.test(normalized) && thicknessValues[0] !== undefined
+          ? thicknessValues[0]
+          : thicknessValues[thicknessValues.length - 1];
+        if (baseValue !== undefined) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'baseThickness',
+            label: CANDIDATE_LABELS.baseThickness,
+            valueType: 'number',
+            valueNumber: baseValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.03,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の路盤厚表記から上層路盤厚候補を生成',
+          }));
+        }
+      }
+      if ((/下層|セメント安定|改良/.test(normalized) && thicknessValues.length >= 1)) {
+        const subBaseValue = thicknessValues[thicknessValues.length - 1];
+        if (subBaseValue !== undefined) {
+          recommendations.push(buildDimensionBoxCandidate({
+            fieldName: 'crushedStoneThickness',
+            label: CANDIDATE_LABELS.crushedStoneThickness,
+            valueType: 'number',
+            valueNumber: subBaseValue,
+            valueText: undefined,
+            confidence: baseConfidence - 0.04,
+            sourceText,
+            sourcePage,
+            sourceBox,
+            reason: 'cadStructured.dimensions の下層路盤 / 改良厚表記から下層厚候補を生成',
+          }));
+        }
+      }
+    }
+
+    if (block.blockType === 'demolition') {
+      if (firstValue !== null && (/W\d|W=|幅/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'demolitionWidth',
+          label: CANDIDATE_LABELS.demolitionWidth,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の幅表記から撤去幅候補を生成',
+        }));
+      }
+      if (firstValue !== null && (/T\d|T=|厚/.test(normalized))) {
+        recommendations.push(buildDimensionBoxCandidate({
+          fieldName: 'demolitionThickness',
+          label: CANDIDATE_LABELS.demolitionThickness,
+          valueType: 'number',
+          valueNumber: firstValue,
+          valueText: undefined,
+          confidence: baseConfidence - 0.02,
+          sourceText,
+          sourcePage,
+          sourceBox,
+          reason: 'cadStructured.dimensions の厚み表記から撤去厚候補を生成',
+        }));
+      }
+    }
+  });
+
+  return dedupeCandidates(recommendations);
+}
+
+function buildMeasurementDerivedCandidates(
+  drawing: Drawing,
+  block: EstimateBlock,
+  masters: PriceMasterItem[],
+  effectiveDate: string,
+): AICandidate[] {
+  const pageScaleKnown = Boolean(drawing.resolvedUnits?.sheetScaleRatio);
+  const calibratedDistanceMeasurements = drawing.manualMeasurements
+    .filter((measurement): measurement is DrawingDistanceMeasurement => measurement.measurementType === 'distance')
+    .map((measurement) => ({
+      measurement,
+      realLength: getRealLengthForMeasurement(measurement, drawing),
+    }))
+    .filter((entry) => entry.realLength !== null)
+    .sort((left, right) => (right.realLength ?? 0) - (left.realLength ?? 0));
+
+  const calibratedPolygonMeasurements = drawing.manualMeasurements
+    .filter((measurement) => measurement.measurementType === 'polygon')
+    .map((measurement) => ({
+      measurement,
+      realArea: getRealAreaForMeasurement(measurement, drawing),
+    }))
+    .filter((entry) => entry.realArea !== null)
+    .sort((left, right) => (right.realArea ?? 0) - (left.realArea ?? 0));
+
+  const workTypeLabel = getWorkTypeLabel(block.blockType);
+  const sheetTypeLabel = drawing.cadStructured?.drawingClassification?.[0]?.sheetTypeName
+    ?? drawing.sheetClassification?.sheetTypeName
+    ?? '未分類';
+  const recommendations: AICandidate[] = [];
+
+  const structuredQuantities = drawing.cadStructured?.quantities ?? [];
+  structuredQuantities.forEach((quantity) => {
+    const fieldName = quantity.fieldName as keyof EstimateBlock;
+    if (!(fieldName in block)) return;
+
+    const rawValue = quantity.value;
+    const valueType = typeof rawValue === 'number' ? 'number' : 'string';
+    const masterType = valueType === 'string'
+      ? masterTypeForCandidate(quantity.fieldName, block.blockType)
+      : null;
+    const rawTextValue = typeof rawValue === 'string' ? rawValue : undefined;
+    const normalized = rawTextValue && masterType
+      ? canonicalizeMasterName(masters, masterType, rawTextValue, effectiveDate)
+      : null;
+    const valueText = normalized?.value ?? rawTextValue;
+    const matchedMaster = normalized?.matched ?? false;
+
+    recommendations.push({
+      id: crypto.randomUUID(),
+      fieldName: quantity.fieldName,
+      label: quantity.label || CANDIDATE_LABELS[quantity.fieldName] || quantity.fieldName,
+      valueType,
+      valueText,
+      valueNumber: typeof rawValue === 'number' ? rawValue : undefined,
+      confidence: quantity.confidence,
+      sourceText: quantity.sourceText,
+      sourcePage: quantity.sourcePage,
+      sourceBox: quantity.sourceBox,
+      reason: matchedMaster
+        ? `cadStructured quantity を単価マスタ名へ正規化して採用`
+        : `cadStructured quantity を ${workTypeLabel} の数量候補へ反映`,
+      requiresReview: quantity.requiresReview || Boolean(masterType && rawTextValue && !matchedMaster),
+      candidateOrigin: 'cad_structured',
+    });
+  });
+
+  const longestDistance = calibratedDistanceMeasurements[0];
+  if (longestDistance) {
+    recommendations.push({
+      id: crypto.randomUUID(),
+      fieldName: 'distance',
+      label: CANDIDATE_LABELS.distance,
+      valueType: 'number',
+      valueNumber: Number(longestDistance.realLength?.toFixed(4) ?? 0),
+      confidence: pageScaleKnown ? 0.93 : 0.91,
+      sourceText: `${longestDistance.measurement.name} / ${sheetTypeLabel}`,
+      sourcePage: longestDistance.measurement.pageNo,
+      sourceBox: [
+        longestDistance.measurement.points[0].x,
+        longestDistance.measurement.points[0].y,
+        longestDistance.measurement.points[1].x,
+        longestDistance.measurement.points[1].y,
+        longestDistance.measurement.points[1].x,
+        longestDistance.measurement.points[1].y,
+        longestDistance.measurement.points[0].x,
+        longestDistance.measurement.points[0].y,
+      ],
+      reason: `${workTypeLabel} と CAD structured classification を使い、手動距離計測から施工延長候補を生成`,
+      requiresReview: false,
+      candidateOrigin: 'manual_measurement',
+    });
+  }
+
+  const largestArea = calibratedPolygonMeasurements[0];
+  if (largestArea?.realArea !== null) {
+    if (block.blockType === 'pavement') {
+      if (block.pavementWidth > 0) {
+        recommendations.push({
+          id: crypto.randomUUID(),
+          fieldName: 'distance',
+          label: CANDIDATE_LABELS.distance,
+          valueType: 'number',
+          valueNumber: Number((largestArea.realArea / block.pavementWidth).toFixed(4)),
+          confidence: 0.88,
+          sourceText: `${largestArea.measurement.name} / 面積 ${largestArea.realArea}m²`,
+          sourcePage: largestArea.measurement.pageNo,
+          sourceBox: [0, 0, 0, 0, 0, 0, 0, 0],
+          reason: 'polygon 面積計測 ÷ 入力済み舗装幅で延長候補を算出',
+          requiresReview: false,
+          candidateOrigin: 'manual_measurement',
+        });
+      } else if (block.distance > 0) {
+        recommendations.push({
+          id: crypto.randomUUID(),
+          fieldName: 'pavementWidth',
+          label: CANDIDATE_LABELS.pavementWidth,
+          valueType: 'number',
+          valueNumber: Number((largestArea.realArea / block.distance).toFixed(4)),
+          confidence: 0.88,
+          sourceText: `${largestArea.measurement.name} / 面積 ${largestArea.realArea}m²`,
+          sourcePage: largestArea.measurement.pageNo,
+          sourceBox: [0, 0, 0, 0, 0, 0, 0, 0],
+          reason: 'polygon 面積計測 ÷ 入力済み延長で舗装幅候補を算出',
+          requiresReview: false,
+          candidateOrigin: 'manual_measurement',
+        });
+      }
+    }
+
+    if (block.blockType === 'demolition') {
+      if (block.demolitionWidth > 0) {
+        recommendations.push({
+          id: crypto.randomUUID(),
+          fieldName: 'distance',
+          label: CANDIDATE_LABELS.distance,
+          valueType: 'number',
+          valueNumber: Number((largestArea.realArea / block.demolitionWidth).toFixed(4)),
+          confidence: 0.88,
+          sourceText: `${largestArea.measurement.name} / 面積 ${largestArea.realArea}m²`,
+          sourcePage: largestArea.measurement.pageNo,
+          sourceBox: [0, 0, 0, 0, 0, 0, 0, 0],
+          reason: 'polygon 面積計測 ÷ 入力済み撤去幅で延長候補を算出',
+          requiresReview: false,
+          candidateOrigin: 'manual_measurement',
+        });
+      } else if (block.distance > 0) {
+        recommendations.push({
+          id: crypto.randomUUID(),
+          fieldName: 'demolitionWidth',
+          label: CANDIDATE_LABELS.demolitionWidth,
+          valueType: 'number',
+          valueNumber: Number((largestArea.realArea / block.distance).toFixed(4)),
+          confidence: 0.88,
+          sourceText: `${largestArea.measurement.name} / 面積 ${largestArea.realArea}m²`,
+          sourcePage: largestArea.measurement.pageNo,
+          sourceBox: [0, 0, 0, 0, 0, 0, 0, 0],
+          reason: 'polygon 面積計測 ÷ 入力済み延長で撤去幅候補を算出',
+          requiresReview: false,
+          candidateOrigin: 'manual_measurement',
+        });
+      }
+    }
+  }
+
+  return dedupeCandidates([...recommendations, ...buildDimensionDerivedCandidates(drawing, block)]);
+}
+
+function rebuildDrawingCandidates(
+  drawing: Drawing,
+  block: EstimateBlock,
+  masters: PriceMasterItem[],
+  effectiveDate: string,
+): Drawing {
+  const baseCandidates = drawing.aiCandidates.filter((candidate) => (
+    candidate.candidateOrigin !== 'cad_structured'
+    && candidate.candidateOrigin !== 'manual_measurement'
+  ));
+  const derivedCandidates = buildMeasurementDerivedCandidates(
+    {
+      ...drawing,
+      aiCandidates: baseCandidates,
+    },
+    block,
+    masters,
+    effectiveDate,
+  );
+  return {
+    ...drawing,
+    aiCandidates: [...baseCandidates, ...derivedCandidates],
+  };
+}
+
 function createBlockForType(projectId: string, blockType: BlockType, baseName: string, drawingId: string | null = null): EstimateBlock {
   const block = createDefaultBlock(projectId, baseName, drawingId);
   block.blockType = blockType;
   return block;
+}
+
+function normalizeAutoBlockName(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+}
+
+function parseNumericQuantity(value: string | number | undefined): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseFloat(value.replace(/,/g, ''));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function buildAutoBlockKey(blockType: BlockType, itemName: string, unitOrMode: string): string {
+  return `${blockType}::${normalizeAutoBlockName(itemName)}::${unitOrMode.trim().toLowerCase()}`;
+}
+
+function buildAutoBlocksFromCadStructured(
+  projectId: string,
+  currentBlocks: EstimateBlock[],
+  drawing: Drawing,
+): EstimateBlock[] {
+  const structuredQuantities = drawing.cadStructured?.quantities ?? [];
+  const existingKeys = new Set(
+    currentBlocks.map((block) => {
+      if (block.blockType === 'count_structure') {
+        return buildAutoBlockKey(block.blockType, block.secondaryProduct || block.name, block.countUnit || '箇所');
+      }
+      if (block.blockType === 'material_takeoff') {
+        return buildAutoBlockKey(block.blockType, block.secondaryProduct || block.name, block.materialTakeoffMode || 'm3');
+      }
+      return '';
+    }).filter(Boolean),
+  );
+  const nextBlocks: EstimateBlock[] = [];
+
+  structuredQuantities.forEach((quantity) => {
+    if (!quantity.autoCreateBlock || !quantity.targetBlockType) return;
+
+    const numericValue = parseNumericQuantity(quantity.value);
+    const itemName = (quantity.itemName || quantity.label || '').trim();
+    if (!numericValue || !itemName) return;
+
+    if (quantity.targetBlockType === 'count_structure') {
+      const countUnit = quantity.quantityUnit || '箇所';
+      const key = buildAutoBlockKey('count_structure', itemName, countUnit);
+      if (existingKeys.has(key)) return;
+
+      const block = createBlockForType(projectId, 'count_structure', itemName, drawing.id);
+      block.name = itemName;
+      block.secondaryProduct = itemName;
+      block.countQuantity = numericValue;
+      block.countUnit = countUnit;
+      block.requiresReviewFields = quantity.requiresReview ? ['countQuantity'] : [];
+      nextBlocks.push(block);
+      existingKeys.add(key);
+      return;
+    }
+
+    if (quantity.targetBlockType === 'material_takeoff') {
+      const materialTakeoffMode = quantity.materialTakeoffMode || (quantity.quantityUnit === 't' ? 't' : 'm3');
+      const key = buildAutoBlockKey('material_takeoff', itemName, materialTakeoffMode);
+      if (existingKeys.has(key)) return;
+
+      const block = createBlockForType(projectId, 'material_takeoff', itemName, drawing.id);
+      block.name = itemName;
+      block.secondaryProduct = itemName;
+      block.materialTakeoffMode = materialTakeoffMode;
+      block.materialDirectQuantity = numericValue;
+      block.requiresReviewFields = quantity.requiresReview ? ['materialDirectQuantity'] : [];
+      nextBlocks.push(block);
+      existingKeys.add(key);
+    }
+  });
+
+  return nextBlocks;
 }
 
 interface HomeProps {
@@ -188,12 +1311,32 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const [initialized, setInitialized] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatusMessage, setUploadStatusMessage] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [hoveredCandidateId, setHoveredCandidateId] = useState<string | null>(null);
   const [activeOcrItemId, setActiveOcrItemId] = useState<string | null>(null);
   const [masters, setMasters] = useState<PriceMasterItem[]>([]);
   const [reportBundle, setReportBundle] = useState<GeneratedReportBundle>(EMPTY_REPORT_BUNDLE);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [logicRun, setLogicRun] = useState<EstimationLogicRunResponse | null>(null);
+  const [logicRunError, setLogicRunError] = useState<string | null>(null);
+  const [isLogicRunning, setIsLogicRunning] = useState(false);
+  const [ocrLearningEntries, setOcrLearningEntries] = useState<OcrLearningEntry[]>([]);
+  const [showGmailPanel, setShowGmailPanel] = useState(false);
+  // 3択モード: 確定版 / 保留版 / 全出力版
+  const [estimateOutputMode, setEstimateOutputMode] = useState<EstimateOutputMode>('confirmed');
+  const [showModeSelector, setShowModeSelector] = useState(false);
+  // スタンプ状態: itemId -> OcrStampStatus
+  const [stampStatuses, setStampStatuses] = useState<Record<string, OcrStampStatus>>({});
+  const handleStampStatusChange = useCallback((itemId: string, status: OcrStampStatus) => {
+    setStampStatuses((prev) => ({ ...prev, [itemId]: status }));
+  }, []);
+  const [pendingLevelAdoption, setPendingLevelAdoption] = useState<{
+    groupId: string;
+    item: { pageNo: number; box: BoundingBox; text: string; value: string | null };
+    suggestedField: keyof EstimateBlock | null;
+  } | null>(null);
+  const ocrReviewPanelRef = useRef<OcrReviewPanelHandle | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -277,9 +1420,58 @@ export default function Home({ preferredBlockType }: HomeProps) {
     });
   }, [appState, activeBlock?.id, activeBlock?.blockType, activeDrawing?.id, activeProject, preferredBlockType]);
 
+  useEffect(() => {
+    setPendingLevelAdoption(null);
+  }, [activeDrawing?.id, activeBlock?.id, activeProject?.id]);
+
   const activeCandidateId = hoveredCandidateId ?? selectedCandidateId;
   const effectiveDate = new Date().toISOString().slice(0, 10);
+  const uploadDisabledReason = isAiApiAvailable() ? null : getAiApiUnavailableMessage();
   const result = useMemo(() => (activeBlock ? calculate(activeBlock, { masters, effectiveDate }) : null), [activeBlock, effectiveDate, masters]);
+  const workbookAudit = useMemo(() => {
+    if (!activeProject) return null;
+    const blockResults = activeProject.blocks.map((block) => ({
+      block,
+      result: calculate(block, { masters, effectiveDate }),
+    }));
+    return buildProjectWorkbookAudit(activeProject, blockResults);
+  }, [activeProject, effectiveDate, masters]);
+  const activeManualResolutions = activeDrawing?.manualResolutions ?? [];
+  const resolvedLevelKeys = useMemo(
+    () => activeManualResolutions.filter((item) => item.resolutionType === 'level_conflict').map((item) => item.resolutionKey),
+    [activeManualResolutions],
+  );
+  const resolvedLinkKeys = useMemo(
+    () => activeManualResolutions.filter((item) => item.resolutionType === 'plan_section_link').map((item) => item.resolutionKey),
+    [activeManualResolutions],
+  );
+  const activeReviewQueue = useMemo(() => deriveDrawingReviewQueue(activeDrawing), [activeDrawing]);
+  const ocrLearningContext = useMemo<OcrLearningContext>(() => ({
+    planSectionLinks: ocrLearningEntries,
+  }), [ocrLearningEntries]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeProject?.id) {
+      setOcrLearningEntries([]);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const entries = await fetchOcrLearningEntries(activeProject.id);
+        if (cancelled) return;
+        setOcrLearningEntries(entries);
+      } catch {
+        if (cancelled) return;
+        setOcrLearningEntries([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject?.id]);
 
   useEffect(() => {
     if (!activeProject || !activeBlock) {
@@ -295,6 +1487,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
         block: activeBlock,
         drawing: activeDrawing,
         effectiveDate,
+        outputMode: estimateOutputMode,
       })
         .then((bundle) => {
           if (cancelled) return;
@@ -307,6 +1500,46 @@ export default function Home({ preferredBlockType }: HomeProps) {
           setReportError(error instanceof Error ? error.message : '帳票生成に失敗しました。');
         });
     }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate, estimateOutputMode]);
+
+  useEffect(() => {
+    if (!activeProject || !activeBlock) {
+      setLogicRun(null);
+      setLogicRunError(null);
+      setIsLogicRunning(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setIsLogicRunning(true);
+      void runEstimationLogic({
+        project: activeProject,
+        block: activeBlock,
+        drawing: activeDrawing,
+        effectiveDate,
+      })
+        .then((run) => {
+          if (cancelled) return;
+          setLogicRun(run);
+          setLogicRunError(null);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setLogicRun(null);
+          setLogicRunError(error instanceof Error ? error.message : '見積ロジックの実行に失敗しました。');
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setIsLogicRunning(false);
+          }
+        });
+    }, 350);
 
     return () => {
       cancelled = true;
@@ -328,6 +1561,17 @@ export default function Home({ preferredBlockType }: HomeProps) {
     });
   }, []);
 
+  const handleOcrJobProgress = useCallback((job: OcrParseJobState) => {
+    const label = job.status === 'queued'
+      ? 'OCRジョブを登録しました。解析待ちです。'
+      : job.status === 'processing'
+        ? 'OCR解析中です。ページ変換と候補抽出を実行しています。'
+        : job.status === 'completed'
+          ? 'OCR解析が完了しました。'
+          : job.error?.message || 'OCR解析ジョブが失敗しました。';
+    setUploadStatusMessage(label);
+  }, []);
+
   const handleProjectMetaChange = useCallback((field: 'name' | 'clientName' | 'siteName', value: string) => {
     replaceActiveProject((project) => ({ ...project, [field]: value }));
   }, [replaceActiveProject]);
@@ -347,8 +1591,68 @@ export default function Home({ preferredBlockType }: HomeProps) {
         }
         return updatedBlock;
       }),
+      drawings: project.drawings.map((drawing) => {
+        if (!activeDrawing || drawing.id !== activeDrawing.id) return drawing;
+        const updatedBlock = project.blocks.map((block) => {
+          if (block.id !== activeBlock.id) return block;
+          const next = { ...block, [field]: value } as EstimateBlock;
+          if (field === 'secondaryProduct' && typeof value === 'string' && value) {
+            next.name = value;
+          }
+          if (field === 'blockType' && typeof value === 'string') {
+            next.name = next.secondaryProduct || `${getWorkTypeLabel(value as BlockType)} 見積`;
+          }
+          return next;
+        }).find((block) => block.id === activeBlock.id) ?? activeBlock;
+        return rebuildDrawingCandidates(drawing, updatedBlock, masters, effectiveDate);
+      }),
+    }));
+  }, [activeDrawing, activeProject, activeBlock, effectiveDate, masters, replaceActiveProject]);
+
+  const handleZoneChange = useCallback((zoneId: string, field: keyof EstimateZone, value: EstimateZone[keyof EstimateZone]) => {
+    if (!activeProject || !activeBlock) return;
+    replaceActiveProject((project) => ({
+      ...project,
+      blocks: project.blocks.map((block) => {
+        if (block.id !== activeBlock.id) return block;
+        return {
+          ...block,
+          zones: block.zones.map((zone) => (
+            zone.id === zoneId
+              ? { ...zone, [field]: value }
+              : zone
+          )),
+        };
+      }),
     }));
   }, [activeProject, activeBlock, replaceActiveProject]);
+
+  const handleAddZone = useCallback(() => {
+    if (!activeProject || !activeBlock) return;
+    const defaultNames = ['A棟前', '共用通路', '駐車場', 'B棟前', 'エントランス前'];
+    const defaultName = defaultNames[activeBlock.zones.length] ?? `区画 ${activeBlock.zones.length + 1}`;
+    const nextZone = createDefaultEstimateZone(defaultName);
+    replaceActiveProject((project) => ({
+      ...project,
+      blocks: project.blocks.map((block) => (
+        block.id === activeBlock.id
+          ? { ...block, zones: [...block.zones, nextZone] }
+          : block
+      )),
+    }));
+  }, [activeBlock, activeProject, replaceActiveProject]);
+
+  const handleRemoveZone = useCallback((zoneId: string) => {
+    if (!activeProject || !activeBlock) return;
+    replaceActiveProject((project) => ({
+      ...project,
+      blocks: project.blocks.map((block) => (
+        block.id === activeBlock.id
+          ? { ...block, zones: block.zones.filter((zone) => zone.id !== zoneId) }
+          : block
+      )),
+    }));
+  }, [activeBlock, activeProject, replaceActiveProject]);
 
   const handleAddProject = useCallback(() => {
     const defaultName = `案件 ${appState ? appState.projects.length + 1 : 1}`;
@@ -371,6 +1675,9 @@ export default function Home({ preferredBlockType }: HomeProps) {
     setSelectedCandidateId(null);
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
+    setUploadStatusMessage(null);
+    setLogicRun(null);
+    setLogicRunError(null);
   }, [appState, preferredBlockType]);
 
   const handleSelectProject = useCallback((projectId: string) => {
@@ -388,9 +1695,12 @@ export default function Home({ preferredBlockType }: HomeProps) {
       };
     });
     setUploadError(null);
+    setUploadStatusMessage(null);
     setSelectedCandidateId(null);
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
+    setLogicRun(null);
+    setLogicRunError(null);
   }, [preferredBlockType]);
 
   const handleAddBlock = useCallback(() => {
@@ -437,26 +1747,76 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const handleSelectDrawing = useCallback((drawingId: string) => {
     setAppState((prev) => (prev ? { ...prev, activeDrawingId: drawingId } : prev));
     setUploadError(null);
+    setUploadStatusMessage(null);
     setSelectedCandidateId(null);
     setHoveredCandidateId(null);
     setActiveOcrItemId(null);
   }, []);
 
+  const handleActivateStep2 = useCallback(() => {
+    ocrReviewPanelRef.current?.focusPanel();
+    if (uploadDisabledReason) {
+      setUploadError(uploadDisabledReason);
+      toast.error(uploadDisabledReason);
+      return;
+    }
+    ocrReviewPanelRef.current?.focusAndOpenUpload();
+  }, [uploadDisabledReason]);
+
   const handleUploadFile = useCallback(async (file: File) => {
     if (!activeProject || !activeBlock) return;
+    if (!isAiApiAvailable()) {
+      const message = getAiApiUnavailableMessage();
+      setUploadError(message);
+      setUploadStatusMessage(null);
+      toast.error(message);
+      return;
+    }
     setUploadError(null);
     setIsUploading(true);
+    setUploadStatusMessage('OCRジョブを作成中です。');
 
     try {
-      const payload = await parseDrawing(file, activeBlock.blockType);
-      const nextDrawing = buildDrawingFromParseResponse(activeProject.id, file, payload);
+      const payload = await parseDrawing(file, activeBlock.blockType, {
+        onProgress: handleOcrJobProgress,
+        learningContext: ocrLearningContext,
+      });
+      const parsedDrawing = buildDrawingFromParseResponse(
+        activeProject.id,
+        file,
+        payload,
+        activeBlock.blockType,
+        masters,
+        new Date().toISOString().slice(0, 10),
+      );
+
+      // 建設用語辞書によるOCRテキスト自動補正を適用
+      if (parsedDrawing.ocrItems.length > 0) {
+        try {
+          const originalTexts = parsedDrawing.ocrItems.map((item) => item.text);
+          const correctedTexts = await correctOcrText(originalTexts);
+          for (let i = 0; i < parsedDrawing.ocrItems.length; i++) {
+            if (correctedTexts[i] && correctedTexts[i] !== parsedDrawing.ocrItems[i].text) {
+              parsedDrawing.ocrItems[i] = { ...parsedDrawing.ocrItems[i], text: correctedTexts[i] };
+            }
+          }
+        } catch {
+          // 補正APIが失敗しても元のOCRテキストで続行
+        }
+      }
+
+      const nextDrawing = rebuildDrawingCandidates(parsedDrawing, activeBlock, masters, effectiveDate);
+      const autoBlocks = buildAutoBlocksFromCadStructured(activeProject.id, activeProject.blocks, nextDrawing);
 
       replaceActiveProject((project) => ({
         ...project,
         drawings: [...project.drawings, nextDrawing],
-        blocks: project.blocks.map((block, index) => (
-          index === 0 && !block.drawingId ? { ...block, drawingId: nextDrawing.id } : block
-        )),
+        blocks: [
+          ...project.blocks.map((block, index) => (
+            index === 0 && !block.drawingId ? { ...block, drawingId: nextDrawing.id } : block
+          )),
+          ...autoBlocks,
+        ],
       }));
 
       setAppState((prev) => (prev ? {
@@ -467,15 +1827,21 @@ export default function Home({ preferredBlockType }: HomeProps) {
       setSelectedCandidateId(nextDrawing.aiCandidates[0]?.id ?? null);
       setHoveredCandidateId(null);
       setActiveOcrItemId(nextDrawing.ocrItems[0]?.id ?? null);
-      toast.success(`図面を解析しました。OCR ${nextDrawing.ocrItems.length} 行、候補 ${nextDrawing.aiCandidates.length} 件です。`);
+      setUploadStatusMessage(null);
+      toast.success(
+        autoBlocks.length > 0
+          ? `図面を解析しました。OCR ${nextDrawing.ocrItems.length} 行、候補 ${nextDrawing.aiCandidates.length} 件、自動追加 block ${autoBlocks.length} 件です。`
+          : `図面を解析しました。OCR ${nextDrawing.ocrItems.length} 行、候補 ${nextDrawing.aiCandidates.length} 件です。`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : '図面解析に失敗しました。';
       setUploadError(message);
+      setUploadStatusMessage(null);
       toast.error(message);
     } finally {
       setIsUploading(false);
     }
-  }, [activeBlock, activeProject, replaceActiveProject]);
+  }, [activeBlock, activeProject, effectiveDate, handleOcrJobProgress, masters, ocrLearningContext, replaceActiveProject]);
 
   const handleApplyCandidate = useCallback((candidateId: string) => {
     if (!activeProject || !activeBlock || !activeDrawing) return;
@@ -528,6 +1894,238 @@ export default function Home({ preferredBlockType }: HomeProps) {
       setSelectedCandidateId(null);
     }
   }, []);
+
+  const handleRequestAdoptLevelCandidate = useCallback((
+    groupId: string,
+    item: { pageNo: number; box: BoundingBox; text: string; value: string | null },
+  ) => {
+    setPendingLevelAdoption({
+      groupId,
+      item,
+      suggestedField: resolveFieldForLevelGroup(groupId),
+    });
+  }, []);
+
+  const handleConfirmLevelAdoption = useCallback((target: LevelAdoptionTarget) => {
+    if (!activeProject || !activeDrawing || !activeBlock || !pendingLevelAdoption) return;
+
+    const { groupId, item } = pendingLevelAdoption;
+    const fieldName = target === 'resolve_only' ? null : target;
+    const numericValue = item.value !== null ? Number(item.value) : null;
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => (
+        drawing.id !== activeDrawing.id
+          ? drawing
+          : {
+              ...drawing,
+              manualResolutions: upsertManualResolution(drawing.manualResolutions ?? [], {
+                resolutionType: 'level_conflict',
+                resolutionKey: groupId,
+                title: `高さラベル採用: ${groupId}`,
+                selectedText: item.text,
+                selectedPageNo: item.pageNo,
+                selectedBox: item.box,
+                appliedFieldName: fieldName ?? undefined,
+                appliedValue: Number.isFinite(numericValue) ? numericValue : item.value,
+                note: fieldName ? `${CANDIDATE_LABELS[fieldName] || fieldName} へ採用` : 'レビュー解消のみ',
+              }),
+            }
+      )),
+      blocks: project.blocks.map((block) => {
+        if (block.id !== activeBlock.id) return block;
+        if (!fieldName || !Number.isFinite(numericValue)) return block;
+        return {
+          ...block,
+          drawingId: activeDrawing.id,
+          [fieldName]: numericValue,
+          requiresReviewFields: block.requiresReviewFields.filter((field) => field !== fieldName),
+        };
+      }),
+    }));
+
+    setPendingLevelAdoption(null);
+    toast.success(
+      fieldName && Number.isFinite(numericValue)
+        ? `「${item.text}」を ${CANDIDATE_LABELS[fieldName] || fieldName} へ採用しました。`
+        : `「${item.text}」を採用し、review queue を閉じました。`,
+    );
+  }, [activeBlock, activeDrawing, activeProject, pendingLevelAdoption, replaceActiveProject]);
+
+  const handleAdoptPlanSectionLink = useCallback((callout: string, linkId: string) => {
+    if (!activeProject || !activeDrawing) return;
+    const selectedLink = activeDrawing.ocrStructured?.planSectionLinks.find((item) => item.id === linkId);
+    if (!selectedLink) return;
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => (
+        drawing.id !== activeDrawing.id
+          ? drawing
+          : {
+              ...drawing,
+              manualResolutions: upsertManualResolution(drawing.manualResolutions ?? [], {
+                resolutionType: 'plan_section_link',
+                resolutionKey: callout,
+                title: `図面リンク採用: ${callout}`,
+                selectedText: `${selectedLink.sourceText} -> ${selectedLink.targetText}`,
+                selectedPageNo: selectedLink.sourcePageNo,
+                selectedBox: selectedLink.sourceBox,
+                note: `${selectedLink.sourceRole} p.${selectedLink.sourcePageNo} と ${selectedLink.targetRole} p.${selectedLink.targetPageNo} を採用`,
+              }),
+            }
+      )),
+    }));
+
+    void savePlanSectionLearning({
+      projectId: activeProject.id,
+      callout,
+      normalizedCallout: normalizeCalloutForLearning(callout),
+      sourceRole: selectedLink.sourceRole,
+      targetRole: selectedLink.targetRole,
+      sourceText: selectedLink.sourceText,
+      targetText: selectedLink.targetText,
+      sourcePageNo: selectedLink.sourcePageNo,
+      targetPageNo: selectedLink.targetPageNo,
+      drawingNo: activeDrawing.drawingNo || undefined,
+      drawingTitle: activeDrawing.drawingTitle || undefined,
+    })
+      .then((entries) => {
+        setOcrLearningEntries(entries);
+      })
+      .catch((error) => {
+        console.error('Failed to persist OCR learning:', error);
+        toast.error('OCR 学習テーブルの保存に失敗しました。');
+      });
+
+    toast.success(`「${callout}」の図面リンクを採用し、review queue を閉じました。`);
+  }, [activeDrawing, activeProject, replaceActiveProject]);
+
+  const handleSaveDistanceMeasurement = useCallback((pageNo: number, points: [DrawingMeasurementPoint, DrawingMeasurementPoint]) => {
+    if (!activeProject || !activeDrawing || !activeBlock) return;
+    const page = activeDrawing.pages.find((item) => item.pageNo === pageNo);
+    if (!page) return;
+
+    const pixelLength = calculateDistancePixels(points[0], points[1]);
+    const realLength = convertDistancePixelsToMeters(
+      pixelLength,
+      page,
+      activeDrawing.resolvedUnits,
+      activeDrawing.measurementCalibrations,
+    );
+    const nextCount = (activeDrawing.manualMeasurements?.filter((item) => item.measurementType === 'distance').length ?? 0) + 1;
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => (
+        drawing.id !== activeDrawing.id
+          ? drawing
+          : rebuildDrawingCandidates({
+              ...drawing,
+              manualMeasurements: [
+                ...(drawing.manualMeasurements ?? []),
+                {
+                  id: crypto.randomUUID(),
+                  measurementType: 'distance',
+                  pageNo,
+                  name: buildDistanceMeasurementName(nextCount),
+                  points,
+                  pixelLength,
+                  realLength,
+                  unit: realLength !== null ? 'm' : 'px',
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            }, activeBlock, masters, effectiveDate)
+      )),
+    }));
+
+    toast.success(realLength !== null ? `距離を ${realLength} m で保存しました。` : `距離を ${pixelLength.toFixed(1)} px で保存しました。`);
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate, masters, replaceActiveProject]);
+
+  const handleSavePolygonMeasurement = useCallback((pageNo: number, points: DrawingMeasurementPoint[]) => {
+    if (!activeProject || !activeDrawing || !activeBlock) return;
+    const page = activeDrawing.pages.find((item) => item.pageNo === pageNo);
+    if (!page) return;
+
+    const pixelArea = calculatePolygonAreaPixels(points);
+    const realArea = convertAreaPixelsToSquareMeters(
+      pixelArea,
+      page,
+      activeDrawing.resolvedUnits,
+      activeDrawing.measurementCalibrations,
+    );
+    const nextCount = (activeDrawing.manualMeasurements?.filter((item) => item.measurementType === 'polygon').length ?? 0) + 1;
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => (
+        drawing.id !== activeDrawing.id
+          ? drawing
+          : rebuildDrawingCandidates({
+              ...drawing,
+              manualMeasurements: [
+                ...(drawing.manualMeasurements ?? []),
+                {
+                  id: crypto.randomUUID(),
+                  measurementType: 'polygon',
+                  pageNo,
+                  name: buildPolygonMeasurementName(nextCount),
+                  points,
+                  pixelArea,
+                  realArea,
+                  unit: realArea !== null ? 'm2' : 'px2',
+                  createdAt: new Date().toISOString(),
+                },
+              ],
+            }, activeBlock, masters, effectiveDate)
+      )),
+    }));
+
+    toast.success(realArea !== null ? `面積を ${realArea} m² で保存しました。` : `面積を ${pixelArea.toFixed(1)} px² で保存しました。`);
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate, masters, replaceActiveProject]);
+
+  const handleSetMeasurementCalibration = useCallback((pageNo: number, measurementId: string, actualLengthMeters: number) => {
+    if (!activeProject || !activeDrawing || !activeBlock) return;
+    const measurement = activeDrawing.manualMeasurements.find((item): item is DrawingDistanceMeasurement => (
+      item.measurementType === 'distance' && item.id === measurementId
+    ));
+    if (!measurement) return;
+
+    const metersPerPixel = calculateMetersPerPixelFromReference(measurement, actualLengthMeters);
+    if (!Number.isFinite(metersPerPixel) || metersPerPixel <= 0) {
+      toast.error('基準寸法の換算に失敗しました。');
+      return;
+    }
+
+    const nextCalibration: DrawingMeasurementCalibration = {
+      id: crypto.randomUUID(),
+      pageNo,
+      measurementId,
+      measurementName: measurement.name,
+      actualLengthMeters,
+      pixelLength: measurement.pixelLength,
+      metersPerPixel,
+      createdAt: new Date().toISOString(),
+    };
+
+    replaceActiveProject((project) => ({
+      ...project,
+      drawings: project.drawings.map((drawing) => {
+        if (drawing.id !== activeDrawing.id) return drawing;
+        return rebuildDrawingCandidates({
+          ...drawing,
+          measurementCalibrations: [
+            ...(drawing.measurementCalibrations ?? []).filter((item) => item.pageNo !== pageNo),
+            nextCalibration,
+          ],
+        }, activeBlock, masters, effectiveDate);
+      }),
+    }));
+
+    toast.success(`${measurement.name} を ${actualLengthMeters} m の基準寸法として保存しました。`);
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate, masters, replaceActiveProject]);
 
   if (!initialized || !appState || !activeProject || !activeBlock || !result) {
     return (
@@ -592,6 +2190,68 @@ export default function Home({ preferredBlockType }: HomeProps) {
       </div>
 
       <div className="px-2 pt-2">
+        {/* ─── 作業フロー Step Indicator ─────────────────────────────────── */}
+        {(() => {
+          const hasDrawings = activeProject.drawings.length > 0;
+          const hasBlocks = activeProject.blocks.length > 0;
+          const hasReport = (reportBundle.estimateRows?.length ?? 0) > 0;
+
+          const completedSteps: WorkflowStep[] = [];
+          let currentStep: WorkflowStep = 1;
+
+          // STEP 1: Gmail受信は完了とみなす（案件が登録されていれば）
+          if (activeProject.clientName || activeProject.siteName) {
+            completedSteps.push(1);
+            currentStep = 2;
+          }
+          // STEP 2: OCR解析
+          if (hasDrawings) {
+            completedSteps.push(2);
+            currentStep = 3;
+          }
+          // STEP 3: 見積入力
+          if (hasBlocks) {
+            completedSteps.push(3);
+            currentStep = 4;
+          }
+          // STEP 4: 帳票出力
+          if (hasReport) {
+            completedSteps.push(4);
+            currentStep = 4;
+          }
+
+          return (
+            <div className="mb-2 space-y-2">
+              <StepIndicator
+                currentStep={currentStep}
+                completedSteps={completedSteps}
+                onGmailClick={() => setShowGmailPanel((prev) => !prev)}
+              />
+              {showGmailPanel && (
+                <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="text-sm font-semibold text-slate-800">Gmail 受信トレイ — 案件自動登録</div>
+                    <button
+                      type="button"
+                      onClick={() => setShowGmailPanel(false)}
+                      className="text-xs text-slate-500 hover:text-slate-700"
+                    >
+                      ✕ 閉じる
+                    </button>
+                  </div>
+                  <GmailInboxPanel
+                    workspaceId={getWorkspaceId()}
+                    onProjectCreated={(_projectId, projectName) => {
+                      setShowGmailPanel(false);
+                      alert(`案件「${projectName}」を登録しました。画面を更新して確認してください。`);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div>
@@ -611,10 +2271,11 @@ export default function Home({ preferredBlockType }: HomeProps) {
                 </label>
               </div>
             </div>
-            <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-1">
-              <GuideStep step="STEP 1" title="工種別見積を選ぶ" description="二次製品・擁壁・舗装・撤去のどれを見積るか選びます。" />
-              <GuideStep step="STEP 2" title="図面を OCR 解析" description="PDF または画像をアップロードすると OCR と候補が生成されます。" />
-              <GuideStep step="STEP 3" title="候補を確認して帳票化" description="根拠 bbox を見ながら候補を反映し、見積書・単価根拠表・要確認一覧を生成します。" />
+            <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-1">
+              <GuideStep step="STEP 1" title="Gmail 案件受信" description="上部の「Gmail受信」ボタンから未読メールを取得し、案件を自動登録します。" onActivate={() => setShowGmailPanel(true)} />
+              <GuideStep step="STEP 2" title="工種別見積を選ぶ" description="二次製品・擁壁・舗装・撤去のどれを見積るか選びます。" />
+              <GuideStep step="STEP 3" title="図面を OCR 解析" description="クリックすると OCR 画面へ移動し、PDF または画像の選択を開きます。" onActivate={handleActivateStep2} />
+              <GuideStep step="STEP 4" title="候補を確認して帳票化" description="根拠 bbox を見ながら候補を反映し、見積書・単価根拠表・要確認一覧を生成します。" />
             </div>
           </div>
         </div>
@@ -631,16 +2292,25 @@ export default function Home({ preferredBlockType }: HomeProps) {
       <div className="flex-1 overflow-auto p-2">
         <div className="grid gap-2 2xl:grid-cols-[420px_minmax(0,1.35fr)_minmax(0,1fr)]">
           <div className="min-h-[720px] overflow-auto">
-            <InputForm block={activeBlock} onChange={handleFieldChange} />
+            <InputForm
+              block={activeBlock}
+              onChange={handleFieldChange}
+              onZoneChange={handleZoneChange}
+              onAddZone={handleAddZone}
+              onRemoveZone={handleRemoveZone}
+            />
           </div>
 
           <OcrReviewPanel
+            ref={ocrReviewPanelRef}
             drawings={activeProject.drawings}
             activeDrawingId={activeDrawing?.id ?? appState.activeDrawingId}
             activeOcrItemId={activeOcrItemId}
             activeCandidateId={activeCandidateId}
             isUploading={isUploading}
             uploadError={uploadError}
+            uploadDisabledReason={uploadDisabledReason}
+            uploadStatusMessage={uploadStatusMessage}
             onUploadFile={handleUploadFile}
             onSelectDrawing={handleSelectDrawing}
             onSelectOcrItem={handleSelectOcrItem}
@@ -648,6 +2318,17 @@ export default function Home({ preferredBlockType }: HomeProps) {
             onHoverCandidate={handleHoverCandidate}
             onApplyCandidate={handleApplyCandidate}
             onApplyAllCandidates={handleApplyAllCandidates}
+            resolvedLevelKeys={resolvedLevelKeys}
+            resolvedLinkKeys={resolvedLinkKeys}
+            savedMeasurements={activeDrawing?.manualMeasurements ?? []}
+            measurementCalibrations={activeDrawing?.measurementCalibrations ?? []}
+            onAdoptLevelCandidate={handleRequestAdoptLevelCandidate}
+            onAdoptPlanSectionLink={handleAdoptPlanSectionLink}
+            onSaveDistanceMeasurement={handleSaveDistanceMeasurement}
+            onSavePolygonMeasurement={handleSavePolygonMeasurement}
+            onSetMeasurementCalibration={handleSetMeasurementCalibration}
+            stampStatuses={stampStatuses}
+            onStampStatusChange={handleStampStatusChange}
           />
 
           <div className="space-y-2">
@@ -660,6 +2341,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
                 <div>工種: <span className="font-semibold text-slate-900">{getWorkTypeLabel(activeBlock.blockType)}</span></div>
                 <div className="mt-1">紐づく図面: <span className="font-semibold text-slate-900">{activeDrawing?.drawingTitle || '未選択'}</span></div>
                 <div className="mt-1">反映済み候補: <span className="font-semibold text-slate-900">{activeBlock.appliedCandidateIds.length} 件</span></div>
+                <div className="mt-1">OCR review queue: <span className="font-semibold text-slate-900">{activeReviewQueue.length} 件</span></div>
               </div>
               {activeBlock.requiresReviewFields.length > 0 ? (
                 <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -670,18 +2352,95 @@ export default function Home({ preferredBlockType }: HomeProps) {
                   現在、要確認で停止している項目はありません。
                 </div>
               )}
+
+              {activeDrawing?.mediaRoute && (
+                <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+                  <div className="font-semibold text-slate-800">OCR pack 判定</div>
+                  <div className="mt-2">媒体: <span className="font-semibold text-slate-900">{activeDrawing.mediaRoute.sourceMediaType}</span></div>
+                  <div className="mt-1">処理経路: <span className="font-semibold text-slate-900">{activeDrawing.mediaRoute.preferredPipeline}</span></div>
+                  <div className="mt-1">シート分類: <span className="font-semibold text-slate-900">{activeDrawing.sheetClassification?.sheetTypeName ?? '未分類'}</span></div>
+                  <div className="mt-1">分野: <span className="font-semibold text-slate-900">{activeDrawing.titleBlockMeta?.discipline ?? activeDrawing.sheetClassification?.discipline ?? 'unknown'}</span></div>
+                  <div className="mt-1">単位: <span className="font-semibold text-slate-900">{activeDrawing.resolvedUnits?.lengthUnit ?? 'unknown'}</span></div>
+                  {activeDrawing.ocrStructured && (
+                    <>
+                      <div className="mt-1">役割候補: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.pageRoles.flatMap((page) => page.roles.map((role) => role.role)).slice(0, 4).join(' / ') || '未抽出'}</span></div>
+                      <div className="mt-1">高さ候補: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.levelCandidates.length}</span></div>
+                      <div className="mt-1">寸法候補: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.dimensionCandidates.length}</span></div>
+                      <div className="mt-1">watchlist: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.ambiguousCandidates.length}</span></div>
+                      <div className="mt-1">図面リンク: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.planSectionLinks.length}</span></div>
+                      <div className="mt-1">再利用学習: <span className="font-semibold text-slate-900">{activeDrawing.ocrStructured.learningMatches?.length ?? 0}</span></div>
+                    </>
+                  )}
+                  {activeDrawing.cadStructured && (
+                    <>
+                      <div className="mt-2 border-t border-slate-200 pt-2 font-semibold text-slate-800">CAD-oriented structured output</div>
+                      <div className="mt-1">entity: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.cadEntities.length}</span></div>
+                      <div className="mt-1">object: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.objects.length}</span></div>
+                      <div className="mt-1">dimension: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.dimensions.length}</span></div>
+                      <div className="mt-1">quantity: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.quantities.length}</span></div>
+                      <div className="mt-1">missing: <span className="font-semibold text-slate-900">{activeDrawing.cadStructured.missingInformation.length}</span></div>
+                      <div className="mt-1">manual measurement: <span className="font-semibold text-slate-900">{activeDrawing.manualMeasurements?.length ?? 0}</span></div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-3 rounded-lg border border-slate-200 bg-white">
+                <div className="border-b border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800">OCR pack review queue</div>
+                <div className="space-y-2 p-3">
+                  {activeReviewQueue.length === 0 ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                      OCR pack 起点での追加レビュー項目はありません。
+                    </div>
+                  ) : (
+                    activeReviewQueue.slice(0, 6).map((item) => <ReviewQueueBadge key={item.id} item={item} />)
+                  )}
+                </div>
+              </div>
             </div>
 
             <CalculationResults result={result} block={activeBlock} />
+            <EstimationLogicCard run={logicRun} loading={isLogicRunning} error={logicRunError} />
+            <WorkbookLogicCard project={activeProject} blockType={activeBlock.blockType} />
             {reportError && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
                 {reportError}
               </div>
             )}
-            <DocumentPanel bundle={reportBundle} drawing={activeDrawing} projectName={activeProject.name} estimateName={activeBlock.name} />
+            <EstimateModeSelector
+              currentMode={estimateOutputMode}
+              onChange={setEstimateOutputMode}
+              isOpen={showModeSelector}
+              onToggle={() => setShowModeSelector((prev) => !prev)}
+              bundle={reportBundle}
+            />
+            <DocumentPanel
+              bundle={reportBundle}
+              drawing={activeDrawing}
+              projectName={activeProject.name}
+              estimateName={activeBlock.name}
+              workbookAudit={workbookAudit}
+              reportRequest={{
+                project: activeProject,
+                block: activeBlock,
+                drawing: activeDrawing,
+                effectiveDate,
+                outputMode: estimateOutputMode,
+              }}
+            />
           </div>
         </div>
       </div>
+
+      <LevelAdoptionModal
+        open={Boolean(pendingLevelAdoption)}
+        title={pendingLevelAdoption?.groupId ?? '高さラベル候補'}
+        candidateText={pendingLevelAdoption?.item.text ?? ''}
+        candidateValue={pendingLevelAdoption?.item.value ?? null}
+        suggestedField={pendingLevelAdoption?.suggestedField ?? null}
+        onClose={() => setPendingLevelAdoption(null)}
+        onConfirm={handleConfirmLevelAdoption}
+      />
 
       <SaveBar autoSave={appState.autoSave} onToggleAutoSave={handleToggleAutoSave} onSave={handleSave} onSaveAs={handleSaveAs} />
     </div>

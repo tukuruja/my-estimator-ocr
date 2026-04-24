@@ -3,17 +3,22 @@ import { useEffect, useMemo, useState } from 'react';
 import Header from '@/components/Header';
 import DocumentPanel from '@/components/DocumentPanel';
 import { generateReport } from '@/lib/api';
+import { calculate } from '@/lib/calculations';
 import { loadData } from '@/lib/storage';
+import { buildProjectWorkbookAudit } from '@/lib/workbookAudit';
 import { getWorkTypeLabel } from '@/lib/workTypes';
 import type { AppState, BlockType, GeneratedReportBundle } from '@/lib/types';
 
 const EMPTY_REPORT_BUNDLE: GeneratedReportBundle = {
   estimateRows: [],
+  changeEstimateRows: [],
   unitPriceEvidenceRows: [],
   reviewIssues: [],
   summary: {
     totalAmount: 0,
     totalRows: 0,
+    changeEstimateRowCount: 0,
+    changeEstimateTotalAmount: 0,
     requiresReviewCount: 0,
   },
 };
@@ -64,6 +69,15 @@ export default function EstimateReportPage({ preferredBlockType }: EstimateRepor
     if (!activeProject || !activeBlock || !appState) return null;
     return activeProject.drawings.find((drawing) => drawing.id === (activeBlock.drawingId ?? appState.activeDrawingId)) ?? activeProject.drawings[0] ?? null;
   }, [activeBlock, activeProject, appState]);
+
+  const workbookAudit = useMemo(() => {
+    if (!activeProject) return null;
+    const effectiveDate = new Date().toISOString().slice(0, 10);
+    return buildProjectWorkbookAudit(activeProject, activeProject.blocks.map((block) => ({
+      block,
+      result: calculate(block, { effectiveDate }),
+    })));
+  }, [activeProject]);
 
   useEffect(() => {
     if (!activeProject || !activeBlock) {
@@ -127,7 +141,19 @@ export default function EstimateReportPage({ preferredBlockType }: EstimateRepor
           </div>
           {error && <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
         </div>
-        <DocumentPanel bundle={bundle} drawing={activeDrawing} projectName={activeProject.name} estimateName={activeBlock.name} />
+        <DocumentPanel
+          bundle={bundle}
+          drawing={activeDrawing}
+          projectName={activeProject.name}
+          estimateName={activeBlock.name}
+          workbookAudit={workbookAudit}
+          reportRequest={{
+            project: activeProject,
+            block: activeBlock,
+            drawing: activeDrawing,
+            effectiveDate: new Date().toISOString().slice(0, 10),
+          }}
+        />
       </main>
     </div>
   );

@@ -1,0 +1,810 @@
+[
+  {
+    "field_key": "abbreviation_candidates",
+    "label": "abbreviation_candidates",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "all_outputs",
+    "label": "all_outputs",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "building_context",
+    "label": "building_context",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "confidence_scores",
+    "label": "confidence_scores",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "dimension_samples",
+    "label": "dimension_samples",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "discipline_hint",
+    "label": "discipline_hint",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "document_priority_context",
+    "label": "document_priority_context",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "drawing_index",
+    "label": "drawing_index",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "drawing_notes",
+    "label": "drawing_notes",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "file_meta",
+    "label": "file_meta",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "file_name",
+    "label": "ファイル名",
+    "data_type": "string",
+    "required_default": "Y",
+    "role": "input",
+    "description": "元ファイル名"
+  },
+  {
+    "field_key": "linked_entities",
+    "label": "linked_entities",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "material_code_candidates",
+    "label": "material_code_candidates",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "mime_type",
+    "label": "MIMEタイプ",
+    "data_type": "string",
+    "required_default": "Y",
+    "role": "input",
+    "description": "媒体判定用"
+  },
+  {
+    "field_key": "north_symbol",
+    "label": "north_symbol",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "ocr_text_blocks",
+    "label": "ocr_text_blocks",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "optional_drawing_index",
+    "label": "optional_drawing_index",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "optional_index_sheet",
+    "label": "optional_index_sheet",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "page_count",
+    "label": "ページ数",
+    "data_type": "integer",
+    "required_default": "N",
+    "role": "input",
+    "description": "複数ページPDF対応"
+  },
+  {
+    "field_key": "page_image_meta",
+    "label": "page_image_meta",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "page_preview",
+    "label": "ページプレビュー",
+    "data_type": "object",
+    "required_default": "Y",
+    "role": "input",
+    "description": "先頭ページプレビュー情報"
+  },
+  {
+    "field_key": "project_trade",
+    "label": "project_trade",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "resolved_units",
+    "label": "resolved_units",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "scale_text",
+    "label": "scale_text",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "sheet_image",
+    "label": "シート画像",
+    "data_type": "object",
+    "required_default": "Y",
+    "role": "input",
+    "description": "OCR/CV処理対象"
+  },
+  {
+    "field_key": "sheet_image_or_text",
+    "label": "sheet_image_or_text",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "sheet_outputs",
+    "label": "sheet_outputs",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "sheet_region",
+    "label": "sheet_region",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "sheet_text",
+    "label": "sheet_text",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "sheet_type",
+    "label": "sheet_type",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "spec_notes",
+    "label": "spec_notes",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "text_layer_probe",
+    "label": "テキストレイヤ判定",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "input",
+    "description": "PDF埋込テキスト有無"
+  },
+  {
+    "field_key": "titleblock_meta",
+    "label": "titleblock_meta",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "input",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "vector_probe",
+    "label": "ベクタ判定",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "input",
+    "description": "線分/テキストオブジェクト有無"
+  },
+  {
+    "field_key": "legend_dictionary",
+    "label": "凡例辞書",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "intermediate",
+    "description": "図面固有辞書"
+  },
+  {
+    "field_key": "legend_region",
+    "label": "凡例領域",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "intermediate",
+    "description": "凡例候補"
+  },
+  {
+    "field_key": "normalized_terms",
+    "label": "正規化語彙",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "intermediate",
+    "description": "略号/材料の正規化結果"
+  },
+  {
+    "field_key": "notes",
+    "label": "notes",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "intermediate",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "ocr_blocks",
+    "label": "OCRブロック群",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "intermediate",
+    "description": "文字ブロック群"
+  },
+  {
+    "field_key": "titleblock_region",
+    "label": "表題欄領域",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "intermediate",
+    "description": "表題欄候補"
+  },
+  {
+    "field_key": "unknown_terms",
+    "label": "unknown_terms",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "intermediate",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "alignment",
+    "label": "線形情報",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "土木図抽出結果"
+  },
+  {
+    "field_key": "building_name",
+    "label": "building_name",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "circuits",
+    "label": "circuits",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "classification_reasons",
+    "label": "classification_reasons",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "confidence",
+    "label": "confidence",
+    "data_type": "number",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "connections",
+    "label": "connections",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "constraints",
+    "label": "constraints",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "cross_sections",
+    "label": "cross_sections",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "discipline",
+    "label": "分野",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "建築/構造/電気/機械/土木"
+  },
+  {
+    "field_key": "doors",
+    "label": "doors",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "drainage",
+    "label": "drainage",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "drawing_no",
+    "label": "図面番号",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "表題欄から抽出"
+  },
+  {
+    "field_key": "drawing_title",
+    "label": "図面名",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "表題欄から抽出"
+  },
+  {
+    "field_key": "ducts",
+    "label": "ducts",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "earthwork",
+    "label": "earthwork",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "elevation_unit",
+    "label": "elevation_unit",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "entity_links",
+    "label": "entity_links",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "equipment",
+    "label": "equipment",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "existing_links",
+    "label": "existing_links",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "finish_tags",
+    "label": "finish_tags",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "fixtures",
+    "label": "器具情報",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "電気/機械の器具"
+  },
+  {
+    "field_key": "foundations",
+    "label": "foundations",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "length_unit",
+    "label": "長さ単位",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "mm/m"
+  },
+  {
+    "field_key": "missing_measurements",
+    "label": "missing_measurements",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "page_rotation_deg",
+    "label": "page_rotation_deg",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "panels",
+    "label": "panels",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "pavement_layers",
+    "label": "pavement_layers",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "piles",
+    "label": "piles",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "pipes",
+    "label": "配管情報",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "機械設備図抽出結果"
+  },
+  {
+    "field_key": "preferred_pipeline",
+    "label": "preferred_pipeline",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "preprocess_flags",
+    "label": "preprocess_flags",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "profile_rows",
+    "label": "profile_rows",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "project_name",
+    "label": "project_name",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "quantity_items",
+    "label": "quantity_items",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "reading_order",
+    "label": "reading_order",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "rebar_specs",
+    "label": "rebar_specs",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "resolved_specs",
+    "label": "resolved_specs",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "revision",
+    "label": "revision",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "rooms",
+    "label": "室情報",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "建築一般図抽出結果"
+  },
+  {
+    "field_key": "sheet_scale",
+    "label": "sheet_scale",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "sheet_scale_ratio",
+    "label": "縮尺比",
+    "data_type": "number",
+    "required_default": "N",
+    "role": "output",
+    "description": "例 100"
+  },
+  {
+    "field_key": "sheet_split_required",
+    "label": "sheet_split_required",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "sheet_type_id",
+    "label": "シート種別ID",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "sheet_type_master参照"
+  },
+  {
+    "field_key": "sheet_type_name",
+    "label": "sheet_type_name",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "site_electrical",
+    "label": "site_electrical",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "source_media_type",
+    "label": "source_media_type",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "space_keys",
+    "label": "space_keys",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "state_rules",
+    "label": "state_rules",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "struct_members",
+    "label": "構造部材",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "構造図抽出結果"
+  },
+  {
+    "field_key": "system_graph",
+    "label": "system_graph",
+    "data_type": "object",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "temporary_constraints",
+    "label": "temporary_constraints",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "unresolved_specs",
+    "label": "unresolved_specs",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "valves",
+    "label": "valves",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "view_direction",
+    "label": "視点方向",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "top_down等"
+  },
+  {
+    "field_key": "walls",
+    "label": "walls",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "windows",
+    "label": "windows",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "zone_name",
+    "label": "zone_name",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "output",
+    "description": "Auto-added from skill/prompt contracts"
+  },
+  {
+    "field_key": "acceptance_status",
+    "label": "受入状態",
+    "data_type": "string",
+    "required_default": "N",
+    "role": "qa",
+    "description": "accepted/blocked"
+  },
+  {
+    "field_key": "conflicts",
+    "label": "矛盾一覧",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "qa",
+    "description": "図面間不整合"
+  },
+  {
+    "field_key": "review_queue",
+    "label": "レビューキュー",
+    "data_type": "array",
+    "required_default": "N",
+    "role": "qa",
+    "description": "要人確認項目"
+  }
+]
