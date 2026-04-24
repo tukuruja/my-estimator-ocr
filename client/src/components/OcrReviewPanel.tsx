@@ -14,6 +14,7 @@ import type {
   DrawingMeasurementPoint,
   DrawingPolygonMeasurement,
   OcrItem,
+  OcrStampStatus,
 } from '@/lib/types';
 import {
   analyzeDrawingWithVision,
@@ -52,6 +53,9 @@ interface OcrReviewPanelProps {
   onSaveDistanceMeasurement: (pageNo: number, points: [DrawingMeasurementPoint, DrawingMeasurementPoint]) => void;
   onSavePolygonMeasurement: (pageNo: number, points: DrawingPolygonMeasurement['points']) => void;
   onSetMeasurementCalibration: (pageNo: number, measurementId: string, actualLengthMeters: number) => void;
+  /** スタンプ状態マップ: itemId -> OcrStampStatus */
+  stampStatuses?: Record<string, OcrStampStatus>;
+  onStampStatusChange?: (itemId: string, status: OcrStampStatus) => void;
 }
 
 export interface OcrReviewPanelHandle {
@@ -166,6 +170,8 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
   onSaveDistanceMeasurement,
   onSavePolygonMeasurement,
   onSetMeasurementCalibration,
+  stampStatuses = {},
+  onStampStatusChange,
 }: OcrReviewPanelProps, ref) {
   const [selectedPageNo, setSelectedPageNo] = useState(1);
   const [zoom, setZoom] = useState(0.45);
@@ -575,8 +581,10 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
               draftMeasurementPoints={draftMeasurementPoints}
               savedMeasurements={pageMeasurements}
               zoom={zoom}
+              stampStatuses={stampStatuses}
               onSelectItem={onSelectOcrItem}
               onCanvasPointAdd={handleCanvasPointAdd}
+              onStampStatusChange={onStampStatusChange}
             />
           </div>
 
@@ -762,7 +770,9 @@ const OcrReviewPanel = forwardRef<OcrReviewPanelHandle, OcrReviewPanelProps>(fun
           <OcrLineList
             items={pageItems}
             activeItemId={activeOcrItemId}
+            stampStatuses={stampStatuses}
             onSelectItem={onSelectOcrItem}
+            onStampStatusChange={onStampStatusChange}
           />
           <CandidatePanel
             candidates={pageCandidates}

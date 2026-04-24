@@ -1,8 +1,9 @@
-import type {
+import {
   CalculationResult,
   ChangeEstimateRow,
   Drawing,
   EstimateBlock,
+  EstimateOutputMode,
   EstimateReportRow,
   GeneratedReportBundle,
   Project,
@@ -15,6 +16,23 @@ interface ReportContext {
   block: EstimateBlock;
   drawing: Drawing | null;
   result: CalculationResult;
+  /** 見積出力モード（3択） */
+  outputMode?: EstimateOutputMode;
+}
+
+/** モード別の確信度閾値 */
+const MODE_CONFIDENCE_THRESHOLD: Record<EstimateOutputMode, number> = {
+  confirmed: 0.8,
+  pending: 0.5,
+  full: 0.0,
+};
+
+/** 確信度に基づくフラグ判定 */
+function classifyByConfidence(confidence: number): { isPending: boolean; requiresReview: boolean } {
+  return {
+    isPending: confidence >= 0.5 && confidence < 0.8,
+    requiresReview: confidence < 0.5,
+  };
 }
 
 function createEstimateRow(input: Omit<EstimateReportRow, 'id'>): EstimateReportRow {
@@ -213,10 +231,19 @@ function buildRequiredFieldIssues(block: EstimateBlock): ReviewIssue[] {
   return issues;
 }
 
-export function generateReportBundle({ project, block, drawing, result }: ReportContext): GeneratedReportBundle {
+export function generateReportBundle({ project, block, drawing, result, outputMode = 'confirmed' }: ReportContext): GeneratedReportBundle {
   const sourceSummary = resolveSourceSummary(drawing);
 
-  const estimateRows = result.lineItems.map((lineItem) => createEstimateRow({
+  // 図面候補の平均確信度を算出
+  const avgConfidence = drawing && drawing.aiCandidates.length > 0
+    ? drawing.aiCandidates.reduce((sum, c) => sum + c.confidence, 0) / drawing.aiCandidates.length
+    : 0.85; // 図面なしの場合は手入力とみなして高信頼度
+
+  const threshold = MODE_CONFIDENCE_THRESHOLD[outputMode];
+  const flags = classifyByConfidence(avgConfidence);
+
+  // 全行を生成（確信度・フラグ付き）
+  const allEstimateRows = result.lineItems.map((lineItem) => createEstimateRow({
     section: lineItem.section,
     itemName: lineItem.itemName,
     specification: lineItem.specification,
@@ -226,9 +253,32 @@ export function generateReportBundle({ project, block, drawing, result }: Report
     amount: lineItem.amount,
     remarks: lineItem.remarks,
     sourceSummary,
+    confidenceLevel: avgConfidence,
+    isPending: flags.isPending,
+    requiresReview: flags.requiresReview,
   }));
 
-  const estimateRowByKey = new Map(result.lineItems.map((lineItem, index) => [lineItem.key, estimateRows[index]]));
+  // モード別フィルタリング
+  const estimateRows = outputMode === 'full'
+    ? allEstimateRows
+    : allEstimateRows.filter((row) => (row.confidenceLevel ?? 1) >= threshold);
+
+  // モード別サマリ算出
+  const confirmedRows = allEstimateRows.filter((row) => (row.confidenceLevel ?? 1) >= 0.8);
+  const pendingRows = allEstimateRows.filter((row) => {
+    const c = row.confidenceLevel ?? 1;
+    return c >= 0.5 && c < 0.8;
+  });
+  const modeSummary = {
+    confirmedCount: confirmedRows.length,
+    pendingCount: pendingRows.length,
+    fullCount: allEstimateRows.length,
+    confirmedAmount: confirmedRows.reduce((sum, r) => sum + r.amount, 0),
+    pendingAmount: pendingRows.reduce((sum, r) => sum + r.amount, 0),
+    fullAmount: allEstimateRows.reduce((sum, r) => sum + r.amount, 0),
+  };
+
+  const estimateRowByKey = new Map(result.lineItems.map((lineItem, index) => [lineItem.key, allEstimateRows[index]]));
   const changeEstimateRows = result.zoneBreakdowns.map((zone) => createChangeEstimateRow({
     zoneName: zone.name,
     itemName: result.displayName,
@@ -317,8 +367,10 @@ export function generateReportBundle({ project, block, drawing, result }: Report
     changeEstimateRows,
     unitPriceEvidenceRows: evidenceRows,
     reviewIssues,
+    outputMode,
+    modeSummary,
     summary: {
-      totalAmount: Math.round(result.totalAmount),
+      totalAmount: Math.round(estimateRows.reduce((sum, r) => sum + r.amount, 0)),
       totalRows: estimateRows.length,
       changeEstimateRowCount: changeEstimateRows.length,
       changeEstimateTotalAmount: changeEstimateRows.reduce((sum, row) => sum + row.totalAmount, 0),

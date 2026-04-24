@@ -10,6 +10,7 @@ import SaveBar from '@/components/SaveBar';
 import OcrReviewPanel from '@/components/OcrReviewPanel';
 import type { OcrReviewPanelHandle } from '@/components/OcrReviewPanel';
 import DocumentPanel from '@/components/DocumentPanel';
+import EstimateModeSelector from '@/components/EstimateModeSelector';
 import { calculate } from '@/lib/calculations';
 import {
   buildDistanceMeasurementName,
@@ -51,11 +52,13 @@ import {
   type DrawingMeasurementCalibration,
   type EstimateBlock,
   type EstimateZone,
+  type EstimateOutputMode,
   type GeneratedReportBundle,
   type MasterType,
   type OcrLearningContext,
   type OcrLearningEntry,
   type OcrReviewQueueItem,
+  type OcrStampStatus,
   type ParseDrawingResponse,
   type PriceMasterItem,
   type Project,
@@ -1320,6 +1323,14 @@ export default function Home({ preferredBlockType }: HomeProps) {
   const [isLogicRunning, setIsLogicRunning] = useState(false);
   const [ocrLearningEntries, setOcrLearningEntries] = useState<OcrLearningEntry[]>([]);
   const [showGmailPanel, setShowGmailPanel] = useState(false);
+  // 3択モード: 確定版 / 保留版 / 全出力版
+  const [estimateOutputMode, setEstimateOutputMode] = useState<EstimateOutputMode>('confirmed');
+  const [showModeSelector, setShowModeSelector] = useState(false);
+  // スタンプ状態: itemId -> OcrStampStatus
+  const [stampStatuses, setStampStatuses] = useState<Record<string, OcrStampStatus>>({});
+  const handleStampStatusChange = useCallback((itemId: string, status: OcrStampStatus) => {
+    setStampStatuses((prev) => ({ ...prev, [itemId]: status }));
+  }, []);
   const [pendingLevelAdoption, setPendingLevelAdoption] = useState<{
     groupId: string;
     item: { pageNo: number; box: BoundingBox; text: string; value: string | null };
@@ -1476,6 +1487,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
         block: activeBlock,
         drawing: activeDrawing,
         effectiveDate,
+        outputMode: estimateOutputMode,
       })
         .then((bundle) => {
           if (cancelled) return;
@@ -1493,7 +1505,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [activeBlock, activeDrawing, activeProject, effectiveDate]);
+  }, [activeBlock, activeDrawing, activeProject, effectiveDate, estimateOutputMode]);
 
   useEffect(() => {
     if (!activeProject || !activeBlock) {
@@ -2315,6 +2327,8 @@ export default function Home({ preferredBlockType }: HomeProps) {
             onSaveDistanceMeasurement={handleSaveDistanceMeasurement}
             onSavePolygonMeasurement={handleSavePolygonMeasurement}
             onSetMeasurementCalibration={handleSetMeasurementCalibration}
+            stampStatuses={stampStatuses}
+            onStampStatusChange={handleStampStatusChange}
           />
 
           <div className="space-y-2">
@@ -2393,6 +2407,13 @@ export default function Home({ preferredBlockType }: HomeProps) {
                 {reportError}
               </div>
             )}
+            <EstimateModeSelector
+              currentMode={estimateOutputMode}
+              onChange={setEstimateOutputMode}
+              isOpen={showModeSelector}
+              onToggle={() => setShowModeSelector((prev) => !prev)}
+              bundle={reportBundle}
+            />
             <DocumentPanel
               bundle={reportBundle}
               drawing={activeDrawing}
@@ -2404,6 +2425,7 @@ export default function Home({ preferredBlockType }: HomeProps) {
                 block: activeBlock,
                 drawing: activeDrawing,
                 effectiveDate,
+                outputMode: estimateOutputMode,
               }}
             />
           </div>

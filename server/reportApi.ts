@@ -75,7 +75,8 @@ async function handleReportApi(req: IncomingMessage, res: ServerResponse): Promi
   const { project, block, drawing, effectiveDate } = await resolveContext(req, body);
   const masters = await listMasterItems({ effectiveDate });
   const result = calculate(block, { masters, effectiveDate });
-  const bundle = generateReportBundle({ project, block, drawing, result });
+  const outputMode = (body as ReportGenerationRequest).outputMode ?? 'confirmed';
+  const bundle = generateReportBundle({ project, block, drawing, result, outputMode });
 
   if (pathname === '/api/reports/change-estimate.pdf') {
     const pdfRequest = body as ChangeEstimatePdfRequest;

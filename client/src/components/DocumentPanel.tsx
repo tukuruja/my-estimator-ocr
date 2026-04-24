@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Download, FileSpreadsheet, FileText, ShieldAlert } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { CheckCircle2, AlertTriangle, Download, FileSpreadsheet, FileText, ListChecks, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type { ChangeEstimateReportHeader, Drawing, GeneratedReportBundle, ReportGenerationRequest, WorkTypeCandidate, WorkbookAuditBundle } from '@/lib/types';
@@ -92,10 +92,25 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
               見積書、単価根拠表、要確認一覧を同じ案件データから生成します。
             </p>
           </div>
-          <div className="text-right text-xs text-slate-500">
-            <div>見積行 {bundle.summary.totalRows} 件</div>
-            <div>変更行 {bundle.summary.changeEstimateRowCount} 件</div>
-            <div>要確認 {bundle.summary.requiresReviewCount} 件</div>
+          <div className="flex flex-col items-end gap-1">
+            {/* 出力モードバッジ */}
+            {bundle.outputMode && (
+              <div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                bundle.outputMode === 'confirmed' ? 'bg-emerald-100 text-emerald-800'
+                : bundle.outputMode === 'pending' ? 'bg-amber-100 text-amber-800'
+                : 'bg-violet-100 text-violet-800'
+              }`}>
+                {bundle.outputMode === 'confirmed' && <CheckCircle2 className="h-3 w-3" />}
+                {bundle.outputMode === 'pending' && <AlertTriangle className="h-3 w-3" />}
+                {bundle.outputMode === 'full' && <ListChecks className="h-3 w-3" />}
+                {bundle.outputMode === 'confirmed' ? '確定版' : bundle.outputMode === 'pending' ? '保留版' : '全出力版'}
+              </div>
+            )}
+            <div className="text-right text-xs text-slate-500">
+              <div>見積行 {bundle.summary.totalRows} 件</div>
+              <div>変更行 {bundle.summary.changeEstimateRowCount} 件</div>
+              <div>要確認 {bundle.summary.requiresReviewCount} 件</div>
+            </div>
           </div>
         </div>
 
@@ -155,9 +170,22 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
               <button
                 type="button"
                 onClick={() => exportCsv(
-                  `${filePrefix}_見積書.csv`,
-                  ['工種', '品名規格', '仕様', '数量', '単位', '単価', '金額', '摘要', '根拠'],
-                  bundle.estimateRows.map((row) => [row.section, row.itemName, row.specification, row.quantity, row.unit, row.unitPrice, row.amount, row.remarks, row.sourceSummary]),
+                  `${filePrefix}_見積書_${bundle.outputMode ?? 'confirmed'}.csv`,
+                  ['工種', '品名規格', '仕様', '数量', '単位', '単価', '金額', '摘要', '根拠', '信頼度', '保留', '要確認'],
+                  bundle.estimateRows.map((row) => [
+                    row.section,
+                    row.itemName,
+                    row.specification,
+                    row.quantity,
+                    row.unit,
+                    row.unitPrice,
+                    row.amount,
+                    row.remarks,
+                    row.sourceSummary,
+                    row.confidenceLevel !== undefined ? `${Math.round((row.confidenceLevel ?? 1) * 100)}%` : '',
+                    row.isPending ? '保留' : '',
+                    row.requiresReview ? '要確認' : '',
+                  ]),
                 )}
                 className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
               >
@@ -178,11 +206,32 @@ export default function DocumentPanel({ bundle, drawing, projectName, estimateNa
               </thead>
               <tbody>
                 {bundle.estimateRows.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100 align-top">
+                  <tr key={row.id} className={`border-b border-slate-100 align-top ${
+                    row.requiresReview ? 'bg-rose-50/40' : row.isPending ? 'bg-amber-50/40' : ''
+                  }`}>
                     <td className="px-2 py-2">{row.section}</td>
                     <td className="px-2 py-2">
-                      <div className="font-semibold text-slate-900">{row.itemName}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-slate-900">{row.itemName}</span>
+                        {row.isPending && (
+                          <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">保留</span>
+                        )}
+                        {row.requiresReview && (
+                          <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-700">要確認</span>
+                        )}
+                      </div>
                       <div className="mt-1 text-[11px] text-slate-500">{row.specification}</div>
+                      {row.confidenceLevel !== undefined && (
+                        <div className="mt-1">
+                          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+                            (row.confidenceLevel ?? 1) >= 0.8 ? 'bg-emerald-100 text-emerald-700'
+                            : (row.confidenceLevel ?? 1) >= 0.5 ? 'bg-amber-100 text-amber-700'
+                            : 'bg-rose-100 text-rose-700'
+                          }`}>
+                            信頼度 {Math.round((row.confidenceLevel ?? 1) * 100)}%
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-2 py-2 text-right">{row.quantity.toLocaleString('ja-JP', { maximumFractionDigits: 2 })}</td>
                     <td className="px-2 py-2">{row.unit}</td>

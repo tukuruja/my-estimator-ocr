@@ -427,6 +427,12 @@ export interface EstimateReportRow {
   amount: number;
   remarks: string;
   sourceSummary: string;
+  /** 確信度（0-1）。モード別フィルタリングに使用 */
+  confidenceLevel?: number;
+  /** 保留フラグ。pendingモードで付与 */
+  isPending?: boolean;
+  /** 要確認フラグ。fullモードで付与 */
+  requiresReview?: boolean;
 }
 
 export interface ChangeEstimateRow {
@@ -491,7 +497,28 @@ export interface GeneratedReportBundle {
     changeEstimateTotalAmount: number;
     requiresReviewCount: number;
   };
+  /** 出力モード（3択） */
+  outputMode?: EstimateOutputMode;
+  /** モード別サマリ */
+  modeSummary?: {
+    confirmedCount: number;
+    pendingCount: number;
+    fullCount: number;
+    confirmedAmount: number;
+    pendingAmount: number;
+    fullAmount: number;
+  };
 }
+
+/**
+ * 見積出力モード（3択）
+ * - confirmed: 確定版 — 確信度80%以上のみ採用。事故らない最小見積。
+ * - pending:   保留版 — 確信度50%以上を採用（保留フラグ付き）。概算見積として使用可能。
+ * - full:      全出力版 — 全読み取り結果を出力（要確認フラグ付き）。最大網羅版。
+ */
+export type EstimateOutputMode = 'confirmed' | 'pending' | 'full';
+
+export type OcrStampStatus = 'adopted' | 'pending' | 'excluded' | 'none';
 
 export type WorkbookAuditStatus = 'matched' | 'mismatch' | 'missing_block' | 'unsupported_logic';
 
@@ -886,6 +913,8 @@ export interface ParseDrawingResponse {
 }
 
 export interface ReportGenerationRequest {
+  /** 見積出力モード（3択）。省略時は 'confirmed' */
+  outputMode?: EstimateOutputMode;
   projectId?: string;
   blockId?: string;
   drawingId?: string | null;
