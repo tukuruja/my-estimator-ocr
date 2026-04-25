@@ -19,6 +19,8 @@ function parseCorsOrigins(): { allowOrigins: string[]; allowOriginRegex: RegExp 
   const defaultOrigins = [
     "http://127.0.0.1:3000",
     "http://localhost:3000",
+    "https://my-estimator-ocr.vercel.app",
+    "https://my-estimator-ocr-tukurtunjas-projects.vercel.app",
   ];
   const envOrigins = (process.env.CORS_ALLOW_ORIGINS || "")
     .split(",")
